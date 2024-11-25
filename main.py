@@ -44,7 +44,11 @@ def get_user_role(user_id):
 async def forward_message(bot, message, target_ids):
     for user_id in target_ids:
         try:
-            await bot.forward_message(chat_id=user_id, from_chat_id=message.chat.id, message_id=message.message_id)
+            await bot.forward_message(
+                chat_id=user_id,
+                from_chat_id=message.chat.id,
+                message_id=message.message_id
+            )
         except Exception as e:
             logger.error(f"Failed to forward message to {user_id}: {e}")
 
@@ -64,14 +68,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_ids = MCQS_TEAM_IDS.union(CHECKER_TEAM_IDS)
         await forward_message(context.bot, message, target_ids)
 
+    elif role == 'mcqs_team':
+        # Forward to Design team
+        target_ids = DESIGN_TEAM_IDS
+        await forward_message(context.bot, message, target_ids)
+
     elif role == 'checker_team':
         # Forward to Word team
         target_ids = WORD_TEAM_IDS
-        await forward_message(context.bot, message, target_ids)
-
-    elif role == 'mcqs_team':
-        # Forward to Checker team
-        target_ids = CHECKER_TEAM_IDS
         await forward_message(context.bot, message, target_ids)
 
     elif role == 'word_team':
