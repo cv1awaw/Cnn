@@ -16,6 +16,7 @@ from roles import (
     WORD_TEAM_IDS,
     DESIGN_TEAM_IDS,
     KING_TEAM_IDS,
+    TARA_TEAM_IDS,
 )
 
 # Enable logging
@@ -33,6 +34,7 @@ ROLE_MAP = {
     'word_team': WORD_TEAM_IDS,
     'design_team': DESIGN_TEAM_IDS,
     'king_team': KING_TEAM_IDS,
+    'tara_team': TARA_TEAM_IDS,
 }
 
 def get_user_role(user_id):
@@ -63,34 +65,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Received message from {user_id} with role {role}")
 
-    if role == 'writer':
-        # Forward to MCQs team and Checker team
-        target_ids = MCQS_TEAM_IDS.union(CHECKER_TEAM_IDS)
+    if role != 'tara_team':
+        # Forward all messages from other roles to Tara
+        target_ids = TARA_TEAM_IDS
         await forward_message(context.bot, message, target_ids)
-
-    elif role == 'mcqs_team':
-        # Forward to Design team
-        target_ids = DESIGN_TEAM_IDS
-        await forward_message(context.bot, message, target_ids)
-
-    elif role == 'checker_team':
-        # Forward to Word team
-        target_ids = WORD_TEAM_IDS
-        await forward_message(context.bot, message, target_ids)
-
-    elif role == 'word_team':
-        # Forward to Design team
-        target_ids = DESIGN_TEAM_IDS
-        await forward_message(context.bot, message, target_ids)
-
-    elif role == 'design_team':
-        # Forward to King team
-        target_ids = KING_TEAM_IDS
-        await forward_message(context.bot, message, target_ids)
-
     else:
-        # For other roles (king_team), no action defined
-        await message.reply_text("Your role does not have permissions to send messages through this bot.")
+        # Forward messages from Tara to all other roles
+        # Aggregate all other team IDs
+        all_other_ids = set()
+        for r, ids in ROLE_MAP.items():
+            if r != 'tara_team':
+                all_other_ids.update(ids)
+        await forward_message(context.bot, message, all_other_ids)
 
 def main():
     BOT_TOKEN = os.getenv('BOT_TOKEN')
