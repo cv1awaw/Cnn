@@ -37,13 +37,26 @@ ROLE_MAP = {
     'tara_team': TARA_TEAM_IDS,
 }
 
+# Define target roles for each role
+SENDING_ROLE_TARGETS = {
+    'writer': ['mcqs_team', 'checker_team', 'tara_team'],
+    'mcqs_team': ['design_team', 'tara_team'],
+    'checker_team': ['tara_team', 'word_team'],
+    'word_team': ['tara_team'],  # Assuming word_team can only send to tara_team
+    'design_team': ['tara_team', 'king_team'],
+    'king_team': ['tara_team'],
+    'tara_team': list(ROLE_MAP.keys()),  # Tara can send to all roles
+}
+
 def get_user_role(user_id):
+    """Determine the role of a user based on their user ID."""
     for role, ids in ROLE_MAP.items():
         if user_id in ids:
             return role
     return None
 
 async def forward_message(bot, message, target_ids):
+    """Forward a message to a list of target user IDs."""
     for user_id in target_ids:
         try:
             await bot.forward_message(
@@ -51,39 +64,52 @@ async def forward_message(bot, message, target_ids):
                 from_chat_id=message.chat.id,
                 message_id=message.message_id
             )
+            logger.info(f"Forwarded message {message.message_id} to {user_id}")
         except Exception as e:
             logger.error(f"Failed to forward message to {user_id}: {e}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle incoming messages and forward them based on user roles."""
     message = update.message
+    if not message:
+        return  # Ignore non-message updates
+
     user_id = message.from_user.id
     role = get_user_role(user_id)
 
     if not role:
         await message.reply_text("You don't have a role assigned to use this bot.")
+        logger.warning(f"Unauthorized access attempt by user {user_id}")
         return
 
-    logger.info(f"Received message from {user_id} with role {role}")
+    logger.info(f"Received message from user {user_id} with role '{role}'")
 
+    # Determine target roles based on sender's role
+    target_roles = SENDING_ROLE_TARGETS.get(role, [])
+
+    # Aggregate target user IDs from target roles
+    target_ids = set()
+    for target_role in target_roles:
+        target_ids.update(ROLE_MAP.get(target_role, []))
+
+    # If the sender is not tara_team, exclude their own user ID from the targets
     if role != 'tara_team':
-        # Forward all messages from other roles to Tara
-        target_ids = TARA_TEAM_IDS
-        await forward_message(context.bot, message, target_ids)
-    else:
-        # Forward messages from Tara to all other roles
-        # Aggregate all other team IDs
-        all_other_ids = set()
-        for r, ids in ROLE_MAP.items():
-            if r != 'tara_team':
-                all_other_ids.update(ids)
-        await forward_message(context.bot, message, all_other_ids)
+        target_ids.discard(user_id)
+
+    # Log the forwarding action
+    logger.info(f"Forwarding message from '{role}' to roles: {target_roles}")
+
+    # Forward the message to the aggregated target user IDs
+    await forward_message(context.bot, message, target_ids)
 
 def main():
+    """Main function to start the Telegram bot."""
     BOT_TOKEN = os.getenv('BOT_TOKEN')
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN is not set in environment variables.")
         return
 
+    # Build the application
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
     # Handle all text and document messages
@@ -91,8 +117,8 @@ def main():
     application.add_handler(message_handler)
 
     # Start the Bot
-    application.run_polling()
     logger.info("Bot started polling...")
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
