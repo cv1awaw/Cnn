@@ -60,8 +60,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Received message from {user_id} with role {role}")
 
     if role == 'writer':
-        # Forward to MCQs team and Word team
-        target_ids = MCQS_TEAM_IDS.union(WORD_TEAM_IDS)
+        # Forward to MCQs team and Checker team
+        target_ids = MCQS_TEAM_IDS.union(CHECKER_TEAM_IDS)
+        await forward_message(context.bot, message, target_ids)
+
+    elif role == 'checker_team':
+        # Forward to Word team
+        target_ids = WORD_TEAM_IDS
+        await forward_message(context.bot, message, target_ids)
+
+    elif role == 'mcqs_team':
+        # Forward to Checker team
+        target_ids = CHECKER_TEAM_IDS
         await forward_message(context.bot, message, target_ids)
 
     elif role == 'word_team':
@@ -75,7 +85,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await forward_message(context.bot, message, target_ids)
 
     else:
-        # For other roles (mcqs_team, checker_team, king_team), no action defined
+        # For other roles (king_team), no action defined
         await message.reply_text("Your role does not have permissions to send messages through this bot.")
 
 def main():
