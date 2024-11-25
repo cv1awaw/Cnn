@@ -87,7 +87,7 @@ def main():
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
     # Handle all text and document messages
-    message_handler = MessageHandler(filters.TEXT | filters.DOCUMENT, handle_message)
+    message_handler = MessageHandler(filters.TEXT | filters.Document.ALL, handle_message)
     application.add_handler(message_handler)
 
     # Start the Bot
@@ -95,4 +95,4 @@ def main():
     logger.info("Bot started polling...")
 
 if __name__ == '__main__':
-        main()
+    main()
