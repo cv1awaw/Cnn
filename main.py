@@ -40,7 +40,7 @@ SENDING_ROLE_TARGETS = {
     'writer': ['mcqs_team', 'checker_team', 'tara_team'],
     'mcqs_team': ['design_team', 'tara_team'],
     'checker_team': ['tara_team', 'word_team'],
-    'word_team': ['tara_team'],  # Assuming word_team can only send to tara_team
+    'word_team': ['tara_team' , 'design_team'],  # Assuming word_team can only send to tara_team
     'design_team': ['tara_team', 'king_team'],
     'king_team': ['tara_team'],
     'tara_team': list(ROLE_MAP.keys()),  # Tara can send to all roles
