@@ -23,11 +23,12 @@ from roles import (
     DESIGN_TEAM_IDS,
     KING_TEAM_IDS,
     TARA_TEAM_IDS,
-    MIND_MAP_FORM_CREATOR_IDS,
+    MIND_MAP_FORM_CREATOR_IDS,  # Newly added
 )
 
 # ------------------ Setup Logging ------------------
 
+# Enable logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -36,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 # ------------------ Define Roles ------------------
 
+# Define roles and their corresponding IDs
 ROLE_MAP = {
     'writer': WRITER_IDS,
     'mcqs_team': MCQS_TEAM_IDS,
@@ -44,9 +46,10 @@ ROLE_MAP = {
     'design_team': DESIGN_TEAM_IDS,
     'king_team': KING_TEAM_IDS,
     'tara_team': TARA_TEAM_IDS,
-    'mind_map_form_creator': MIND_MAP_FORM_CREATOR_IDS,
+    'mind_map_form_creator': MIND_MAP_FORM_CREATOR_IDS,  # Newly added
 }
 
+# Define display names for each role
 ROLE_DISPLAY_NAMES = {
     'writer': 'Writer Team',
     'mcqs_team': 'MCQs Team',
@@ -55,19 +58,22 @@ ROLE_DISPLAY_NAMES = {
     'design_team': 'Design Team',
     'king_team': 'Admin Team',
     'tara_team': 'Tara Team',
-    'mind_map_form_creator': 'Mind Map & Form Creation Team',
+    'mind_map_form_creator': 'Mind Map & Form Creation Team',  # Newly added
 }
 
+# Define trigger to target roles mapping
 TRIGGER_TARGET_MAP = {
     '-w': ['writer'],
-    '-e': ['checker_team'],
+    '-e': ['checker_team'],          # Editor Team
     '-mcq': ['mcqs_team'],
     '-d': ['word_team'],
     '-de': ['design_team'],
     '-mf': ['mind_map_form_creator'],
-    '-t': ['tara_team'],
+    '-t': ['tara_team'],             # Newly added trigger for Tara Team
 }
 
+# Define target roles for each role
+# Adjusted to ensure that other roles can only send messages to 'tara_team'
 SENDING_ROLE_TARGETS = {
     'writer': ['tara_team'],
     'mcqs_team': ['tara_team'],
@@ -75,7 +81,7 @@ SENDING_ROLE_TARGETS = {
     'word_team': ['tara_team'],
     'design_team': ['tara_team'],
     'king_team': ['tara_team'],
-    'tara_team': list(ROLE_MAP.keys()),
+    'tara_team': list(ROLE_MAP.keys()),  # Tara can send to all roles
     'mind_map_form_creator': ['tara_team'],
 }
 
@@ -84,17 +90,20 @@ SENDING_ROLE_TARGETS = {
 TEAM_MESSAGE = 1
 SPECIFIC_TEAM_MESSAGE = 2
 SPECIFIC_USER_MESSAGE = 3
-TARA_MESSAGE = 4
-CONFIRMATION = 5
+TARA_MESSAGE = 4  # Newly added
+CONFIRMATION = 5  # Newly added state for confirmation
 
 # ------------------ User Data Storage ------------------
 
+# User data storage: username (lowercase) -> user_id
 USER_DATA_FILE = Path('user_data.json')
 
+# Load existing user data if the file exists
 if USER_DATA_FILE.exists():
     with open(USER_DATA_FILE, 'r') as f:
         try:
             user_data_store = json.load(f)
+            # Convert keys to lowercase to maintain consistency
             user_data_store = {k.lower(): v for k, v in user_data_store.items()}
             logger.info("Loaded existing user data from user_data.json.")
         except json.JSONDecodeError:
@@ -104,6 +113,7 @@ else:
     user_data_store = {}
 
 def save_user_data():
+    """Save the user_data_store to a JSON file."""
     try:
         with open(USER_DATA_FILE, 'w') as f:
             json.dump(user_data_store, f)
@@ -112,6 +122,7 @@ def save_user_data():
         logger.error(f"Failed to save user data: {e}")
 
 def get_user_role(user_id):
+    """Determine the role of a user based on their user ID."""
     for role, ids in ROLE_MAP.items():
         if user_id in ids:
             return role
@@ -119,8 +130,10 @@ def get_user_role(user_id):
 
 # ------------------ Mute Functionality ------------------
 
+# Mute data storage: list of muted user IDs
 MUTED_USERS_FILE = Path('muted_users.json')
 
+# Load existing muted users if the file exists
 if MUTED_USERS_FILE.exists():
     with open(MUTED_USERS_FILE, 'r') as f:
         try:
@@ -133,6 +146,7 @@ else:
     muted_users = set()
 
 def save_muted_users():
+    """Save the muted_users set to a JSON file."""
     try:
         with open(MUTED_USERS_FILE, 'w') as f:
             json.dump(list(muted_users), f)
@@ -142,8 +156,10 @@ def save_muted_users():
 
 # ------------------ Sent Messages Tracking ------------------
 
+# Sent messages storage: list of {"chat_id": int, "message_id": int}
 SENT_MESSAGES_FILE = Path('sent_messages.json')
 
+# Load existing sent messages if the file exists
 if SENT_MESSAGES_FILE.exists():
     with open(SENT_MESSAGES_FILE, 'r') as f:
         try:
@@ -156,6 +172,7 @@ else:
     sent_messages = []
 
 def save_sent_messages():
+    """Save the sent_messages list to a JSON file."""
     try:
         with open(SENT_MESSAGES_FILE, 'w') as f:
             json.dump(sent_messages, f)
@@ -166,6 +183,8 @@ def save_sent_messages():
 # ------------------ Message Forwarding ------------------
 
 async def forward_message(bot, message, target_ids, sender_role):
+    """Forward a message to a list of target user IDs and notify about the sender's role."""
+    # Get the display name for the sender's role
     sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
 
     for user_id in target_ids:
@@ -185,7 +204,7 @@ async def forward_message(bot, message, target_ids, sender_role):
             })
             save_sent_messages()
 
-            # Send a role notification
+            # Send an additional message indicating the sender's role with display name
             role_notification = f"🔄 *This message was sent by **{sender_display_name}**.*"
             notification_message = await bot.send_message(
                 chat_id=user_id,
@@ -194,7 +213,7 @@ async def forward_message(bot, message, target_ids, sender_role):
             )
             logger.info(f"Sent role notification to {user_id}")
 
-            # Log the notification message
+            # Optionally, log the notification message as well if you want to delete it later
             sent_messages.append({
                 "chat_id": user_id,
                 "message_id": notification_message.message_id
@@ -873,6 +892,21 @@ async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         failed_text = "\n".join(failed_deletions)
         await update.message.reply_text(f"⚠️ Failed to delete the following messages:\n{failed_text}")
 
+# ------------------ Error Handler ------------------
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and notify the user."""
+    logger.error(msg="Exception while handling an update:", exc_info=context.error)
+
+    # Notify the user that an error occurred (optional)
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "An unexpected error occurred. Please try again later."
+            )
+        except Exception as e:
+            logger.error(f"Failed to send error message to user: {e}")
+
 # ------------------ Main Function ------------------
 
 def main():
@@ -939,6 +973,9 @@ def main():
         handle_general_message
     )
     application.add_handler(message_handler)
+
+    # Register the error handler
+    application.add_error_handler(error_handler)
 
     # Start the Bot
     logger.info("Bot started polling...")
