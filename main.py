@@ -122,12 +122,8 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
     for target_role in target_roles:
         target_ids.update(ROLE_MAP.get(target_role, []))
 
-    # Exclude the sender's user ID if they are in 'tara_team'
-    if role == 'tara_team':
-        target_ids.discard(user_id)
-    else:
-        # For non-Tara teams, ensure the sender doesn't receive their own message
-        target_ids.discard(user_id)
+    # Exclude the sender's user ID from all forwards
+    target_ids.discard(user_id)
 
     # Log the forwarding action
     logger.info(f"Forwarding message from '{role}' to roles: {target_roles}")
@@ -136,7 +132,7 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
     await forward_message(context.bot, message, target_ids, sender_role=role)
 
 async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger function when a user sends a message containing '-team-'."""
+    """Trigger function when a user sends a message containing '-team-', '-Team', or '-TEAM-'."""
     await update.message.reply_text("Write your message for your team.")
     return TEAM_MESSAGE
 
@@ -157,19 +153,17 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     for target_role in target_roles:
         target_ids.update(ROLE_MAP.get(target_role, []))
 
-    # Exclude the sender's user ID if they are in 'tara_team'
-    if role == 'tara_team':
-        target_ids.discard(user_id)
-    else:
-        # For non-Tara teams, ensure the sender doesn't receive their own message
-        target_ids.discard(user_id)
+    # Exclude the sender's user ID from all forwards
+    target_ids.discard(user_id)
 
     # Forward the message
     await forward_message(context.bot, message, target_ids, sender_role=role)
 
     # Prepare display names for confirmation
     sender_display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
-    recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
+    # Remove duplicates in target_roles
+    unique_target_roles = list(dict.fromkeys(target_roles))
+    recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in unique_target_roles]
 
     confirmation = (
         f"✅ *Your message has been sent from **{sender_display_name}** "
@@ -186,7 +180,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Define the ConversationHandler
 team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)-team-'), team_trigger)],
+    entry_points=[MessageHandler(filters.Regex(r'(?i)-team-?'), team_trigger)],
     states={
         TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, team_message_handler)],
     },
