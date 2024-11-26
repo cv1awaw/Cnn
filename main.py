@@ -47,7 +47,7 @@ ROLE_DISPLAY_NAMES = {
     'word_team': 'Digital Writers',
     'design_team': 'Design Team',
     'king_team': 'Admin Team',
-    'tara_team': 'Tara Team',  # Assuming you want to keep this as is
+    'tara_team': 'Tara Team',  # Keeping as is
 }
 
 # Define target roles for each role
@@ -98,7 +98,7 @@ async def forward_message(bot, message, target_ids, sender_role):
         except Exception as e:
             logger.error(f"Failed to forward message or send role notification to {user_id}: {e}")
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming messages and forward them based on user roles."""
     message = update.message
     if not message:
@@ -125,6 +125,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Exclude the sender's user ID if they are in 'tara_team'
     if role == 'tara_team':
         target_ids.discard(user_id)
+    else:
+        # For non-Tara teams, ensure the sender doesn't receive their own message
+        target_ids.discard(user_id)
 
     # Log the forwarding action
     logger.info(f"Forwarding message from '{role}' to roles: {target_roles}")
@@ -132,12 +135,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Forward the message to the aggregated target user IDs with role notification
     await forward_message(context.bot, message, target_ids, sender_role=role)
 
-# Conversation handler functions
 async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger function when a user sends a message containing '-team-'."""
     await update.message.reply_text("Write your message for your team.")
     return TEAM_MESSAGE
 
 async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the team message after the trigger."""
     message = update.message
     user_id = message.from_user.id
     role = get_user_role(user_id)
@@ -156,6 +160,9 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     # Exclude the sender's user ID if they are in 'tara_team'
     if role == 'tara_team':
         target_ids.discard(user_id)
+    else:
+        # For non-Tara teams, ensure the sender doesn't receive their own message
+        target_ids.discard(user_id)
 
     # Forward the message
     await forward_message(context.bot, message, target_ids, sender_role=role)
@@ -173,6 +180,7 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel the conversation."""
     await update.message.reply_text("Operation cancelled.")
     return ConversationHandler.END
 
@@ -199,7 +207,7 @@ def main():
     application.add_handler(team_conv_handler)
 
     # Handle all other text and document messages
-    message_handler = MessageHandler(filters.TEXT | filters.Document.ALL, handle_message)
+    message_handler = MessageHandler(filters.TEXT | filters.Document.ALL, handle_general_message)
     application.add_handler(message_handler)
 
     # Start the Bot
