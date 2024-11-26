@@ -369,6 +369,70 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
 
     return ConversationHandler.END
 
+async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the general team trigger."""
+    user_id = update.message.from_user.id
+    role = get_user_role(user_id)
+
+    if not role:
+        await update.message.reply_text("You don't have a role assigned to use this bot.")
+        logger.warning(f"Unauthorized access attempt by user {user_id} for general team trigger.")
+        return ConversationHandler.END
+
+    # Determine which roles the sender can send messages to
+    target_roles = SENDING_ROLE_TARGETS.get(role, [])
+
+    if not target_roles:
+        await update.message.reply_text("You have no teams to send messages to.")
+        logger.info(f"No target roles found for user {user_id} with role '{role}'.")
+        return ConversationHandler.END
+
+    # Store target roles in user_data for use in the next step
+    context.user_data['specific_target_roles'] = target_roles
+
+    await update.message.reply_text("Write your message for your team.")
+    return TEAM_MESSAGE
+
+async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the team message after the general trigger."""
+    message = update.message
+    user_id = message.from_user.id
+    role = get_user_role(user_id)
+
+    if not role:
+        await message.reply_text("You don't have a role assigned to use this bot.")
+        logger.warning(f"Unauthorized access attempt by user {user_id}")
+        return ConversationHandler.END
+
+    target_roles = context.user_data.get('specific_target_roles', [])
+    target_ids = set()
+
+    for target_role in target_roles:
+        target_ids.update(ROLE_MAP.get(target_role, []))
+
+    # Exclude the sender's user ID from all forwards
+    target_ids.discard(user_id)
+
+    if not target_ids:
+        await message.reply_text("No recipients found to send your message.")
+        logger.warning(f"No recipients found for user {user_id} with role '{role}'.")
+        return ConversationHandler.END
+
+    # Forward the message
+    await forward_message(context.bot, message, target_ids, sender_role=role)
+
+    # Prepare display names for confirmation
+    sender_display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
+    recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
+
+    confirmation = (
+        f"✅ *Your message has been sent from **{sender_display_name}** "
+        f"to **{', '.join(recipient_display_names)}**.*"
+    )
+    await message.reply_text(confirmation, parse_mode='Markdown')
+
+    return ConversationHandler.END
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the conversation."""
     await update.message.reply_text("Operation cancelled.")
