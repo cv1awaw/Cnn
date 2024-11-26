@@ -40,7 +40,7 @@ SENDING_ROLE_TARGETS = {
     'writer': ['mcqs_team', 'checker_team', 'tara_team'],
     'mcqs_team': ['design_team', 'tara_team'],
     'checker_team': ['tara_team', 'word_team'],
-    'word_team': ['tara_team' , 'design_team'],  # Assuming word_team can only send to tara_team
+    'word_team': ['tara_team', 'design_team'],
     'design_team': ['tara_team', 'king_team'],
     'king_team': ['tara_team'],
     'tara_team': list(ROLE_MAP.keys()),  # Tara can send to all roles
@@ -53,20 +53,30 @@ def get_user_role(user_id):
             return role
     return None
 
-async def forward_message(bot, message, target_ids):
-    """Forward a message to a list of target user IDs."""
+async def forward_message(bot, message, target_ids, sender_info=None):
+    """Forward a message to a list of target user IDs with sender information."""
     for user_id in target_ids:
         try:
-            await bot.forward_message(
-                chat_id=user_id,
-                from_chat_id=message.chat.id,
-                message_id=message.message_id
-            )
+            if sender_info:
+                # Customize the message with sender information
+                forwarded_text = f"📤 **Forwarded Message**\n**From:** {sender_info}\n\n{message.text}"
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=forwarded_text,
+                    parse_mode='Markdown'
+                )
+            else:
+                # If no sender info is provided, just forward the message
+                await bot.forward_message(
+                    chat_id=user_id,
+                    from_chat_id=message.chat.id,
+                    message_id=message.message_id
+                )
             logger.info(f"Forwarded message {message.message_id} to {user_id}")
         except Exception as e:
             logger.error(f"Failed to forward message to {user_id}: {e}")
 
-async def handle_role_message(bot, chat_id, message_text, role):
+async def handle_role_message(bot, chat_id, message_text, role, user_info):
     """Handle messages prefixed with -role and send them to the sender's team and tara_team."""
     # Extract the actual message by removing the prefix
     actual_message = message_text[len('-role'):].strip()
@@ -75,45 +85,33 @@ async def handle_role_message(bot, chat_id, message_text, role):
         return
 
     # Get the list of user IDs for the sender's role
-    target_ids = ROLE_MAP.get(role, []).copy()  # Copy to avoid modifying the original list
+    target_ids = SENDING_ROLE_TARGETS.get(role, []).copy()
 
-    # Optionally, exclude the sender from receiving their own message
-    # Uncomment the following line if needed:
-    # target_ids = [uid for uid in target_ids if uid != chat_id]
+    # Aggregate all target user IDs from the target roles
+    aggregated_ids = []
+    for target_role in target_ids:
+        aggregated_ids.extend(ROLE_MAP.get(target_role, []))
 
-    # Send the message to each target user in the sender's team
-    for user_id in target_ids:
+    # Remove sender's ID if they are not in tara_team
+    if role != 'tara_team' and chat_id in aggregated_ids:
+        aggregated_ids.remove(chat_id)
+
+    # Remove duplicates by converting to set
+    aggregated_ids = list(set(aggregated_ids))
+
+    # Send the message to each target user with sender info
+    sender_info = f"{user_info['first_name']} ({role})"
+    for user_id in aggregated_ids:
         try:
-            await bot.send_message(chat_id=user_id, text=f"[{role}] {actual_message}")
+            forwarded_text = f"📤 **Forwarded Message**\n**From:** {sender_info}\n\n{actual_message}"
+            await bot.send_message(
+                chat_id=user_id,
+                text=forwarded_text,
+                parse_mode='Markdown'
+            )
             logger.info(f"Sent role-specific message to {user_id}")
         except Exception as e:
             logger.error(f"Failed to send role-specific message to {user_id}: {e}")
-
-    # Now, send the message to tara_team with role information
-    tara_ids = ROLE_MAP.get('tara_team', [])
-    if tara_ids:
-        tara_message = f"[{role}] {actual_message}"
-        for tara_id in tara_ids:
-            try:
-                await bot.send_message(chat_id=tara_id, text=tara_message)
-                logger.info(f"Sent message to tara_team member {tara_id}")
-            except Exception as e:
-                logger.error(f"Failed to send message to tara_team member {tara_id}: {e}")
-    else:
-        logger.warning("No members found in tara_team.")
-
-async def forward_message_to_targets(bot, message, target_ids):
-    """Forward the actual message to target user IDs."""
-    try:
-        for user_id in target_ids:
-            await bot.copy_message(
-                chat_id=user_id,
-                from_chat_id=message.chat.id,
-                message_id=message.message_id
-            )
-            logger.info(f"Copied message {message.message_id} to {user_id}")
-    except Exception as e:
-        logger.error(f"Failed to copy message to {user_id}: {e}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming messages and forward them based on user roles."""
@@ -133,28 +131,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     message_text = message.text or ""
 
+    # Get user info for sender details
+    user_info = {
+        'first_name': message.from_user.first_name,
+        'username': message.from_user.username,
+    }
+
     if message_text.startswith('-role'):
         # Handle role-specific message
         logger.info(f"Handling role-specific message from '{role}'")
-        await handle_role_message(context.bot, message.chat.id, message_text, role)
+        await handle_role_message(context.bot, message.chat.id, message_text, role, user_info)
     else:
         # Determine target roles based on sender's role
         target_roles = SENDING_ROLE_TARGETS.get(role, [])
 
         # Aggregate target user IDs from target roles
-        target_ids = set()
+        target_ids = []
         for target_role in target_roles:
-            target_ids.update(ROLE_MAP.get(target_role, []))
+            target_ids.extend(ROLE_MAP.get(target_role, []))
 
-        # If the sender is not tara_team, exclude their own user ID from the targets
-        if role != 'tara_team':
-            target_ids.discard(user_id)
+        # Remove sender's ID if they are not in tara_team
+        if role != 'tara_team' and user_id in target_ids:
+            target_ids.remove(user_id)
+
+        # Remove duplicates by converting to set
+        target_ids = list(set(target_ids))
 
         # Log the forwarding action
         logger.info(f"Forwarding message from '{role}' to roles: {target_roles}")
 
-        # Forward the message to the aggregated target user IDs
-        await forward_message_to_targets(context.bot, message, target_ids)
+        # Prepare sender information
+        sender_info = f"{user_info['first_name']} ({role})"
+
+        # Send the message to each target user with sender info
+        for target_id in target_ids:
+            try:
+                forwarded_text = f"📤 **Forwarded Message**\n**From:** {sender_info}\n\n{message_text}"
+                await context.bot.send_message(
+                    chat_id=target_id,
+                    text=forwarded_text,
+                    parse_mode='Markdown'
+                )
+                logger.info(f"Sent message to {target_id}")
+            except Exception as e:
+                logger.error(f"Failed to send message to {target_id}: {e}")
 
 def main():
     """Main function to start the Telegram bot."""
