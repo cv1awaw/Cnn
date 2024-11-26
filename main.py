@@ -55,18 +55,29 @@ def get_user_role(user_id):
             return role
     return None
 
-async def forward_message(bot, message, target_ids):
-    """Forward a message to a list of target user IDs."""
+async def forward_message(bot, message, target_ids, sender_role):
+    """Forward a message to a list of target user IDs and notify about the sender's role."""
     for user_id in target_ids:
         try:
+            # Forward the original message
             await bot.forward_message(
                 chat_id=user_id,
                 from_chat_id=message.chat.id,
                 message_id=message.message_id
             )
             logger.info(f"Forwarded message {message.message_id} to {user_id}")
+
+            # Send an additional message indicating the sender's role
+            role_notification = f"🔄 *This message was sent by a **{sender_role}**.*"
+            await bot.send_message(
+                chat_id=user_id,
+                text=role_notification,
+                parse_mode='Markdown'
+            )
+            logger.info(f"Sent role notification to {user_id}")
+        
         except Exception as e:
-            logger.error(f"Failed to forward message to {user_id}: {e}")
+            logger.error(f"Failed to forward message or send role notification to {user_id}: {e}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming messages and forward them based on user roles."""
@@ -99,8 +110,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Log the forwarding action
     logger.info(f"Forwarding message from '{role}' to roles: {target_roles}")
 
-    # Forward the message to the aggregated target user IDs
-    await forward_message(context.bot, message, target_ids)
+    # Forward the message to the aggregated target user IDs with role notification
+    await forward_message(context.bot, message, target_ids, sender_role=role)
 
 def main():
     """Main function to start the Telegram bot."""
