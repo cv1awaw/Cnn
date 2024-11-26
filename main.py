@@ -118,6 +118,32 @@ def get_user_role(user_id):
             return role
     return None
 
+# ------------------ Mute Functionality ------------------
+
+# Mute data storage: list of muted user IDs
+MUTED_USERS_FILE = Path('muted_users.json')
+
+# Load existing muted users if the file exists
+if MUTED_USERS_FILE.exists():
+    with open(MUTED_USERS_FILE, 'r') as f:
+        try:
+            muted_users = set(json.load(f))
+            logger.info("Loaded existing muted users from muted_users.json.")
+        except json.JSONDecodeError:
+            muted_users = set()
+            logger.error("muted_users.json is not a valid JSON file. Starting with an empty muted users set.")
+else:
+    muted_users = set()
+
+def save_muted_users():
+    """Save the muted_users set to a JSON file."""
+    try:
+        with open(MUTED_USERS_FILE, 'w') as f:
+            json.dump(list(muted_users), f)
+            logger.info("Saved muted users to muted_users.json.")
+    except Exception as e:
+        logger.error(f"Failed to save muted users: {e}")
+
 async def forward_message(bot, message, target_ids, sender_role):
     """Forward a message to a list of target user IDs and notify about the sender's role."""
     # Get the display name for the sender's role
@@ -145,6 +171,8 @@ async def forward_message(bot, message, target_ids, sender_role):
         except Exception as e:
             logger.error(f"Failed to forward message or send role notification to {user_id}: {e}")
 
+# ------------------ Command Handlers ------------------
+
 async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming messages and forward them based on user roles."""
     message = update.message
@@ -153,6 +181,12 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
 
     user_id = message.from_user.id
     username = message.from_user.username
+
+    # Check if the user is muted
+    if user_id in muted_users:
+        await message.reply_text("You have been muted and cannot send messages through this bot.")
+        logger.info(f"Muted user {user_id} attempted to send a message.")
+        return
 
     # Store the username and user_id if username exists
     if username:
@@ -246,7 +280,226 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"**Registered Users:**\n{user_list}", parse_mode='Markdown')
     logger.info(f"User {user_id} requested the list of users.")
 
-async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Provide help information to users."""
+    help_text = (
+        "📘 *Available Commands:*\n\n"
+        "/start - Initialize interaction with the bot.\n"
+        "/listusers - List all registered users (Tara Team only).\n"
+        "/help - Show this help message.\n"
+        "/refresh - Refresh your user information.\n\n"
+        "*Specific Commands for Tara Team:*\n"
+        "/mute - Mute yourself.\n"
+        "/muteid <user_id> - Mute a specific user by their ID.\n"
+        "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
+        "/listmuted - List all currently muted users."
+    )
+    await update.message.reply_text(help_text, parse_mode='Markdown')
+    logger.info(f"User {update.effective_user.id} requested help.")
+
+async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Refresh user information."""
+    user = update.effective_user
+    if not user.username:
+        await update.message.reply_text(
+            "Please set a Telegram username in your profile to refresh your information."
+        )
+        logger.warning(f"User {user.id} has no username and cannot be refreshed.")
+        return
+
+    # Store the username and user_id
+    username_lower = user.username.lower()
+    user_data_store[username_lower] = user.id
+    logger.info(f"User {user.id} with username '{username_lower}' refreshed their info.")
+    
+    # Save to JSON file
+    save_user_data()
+
+    await update.message.reply_text(
+        "Your information has been refreshed successfully."
+    )
+
+# ------------------ Mute Command Handlers ------------------
+
+async def mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mute the sender, preventing them from sending messages via the bot."""
+    user_id = update.message.from_user.id
+    role = get_user_role(user_id)
+
+    # Restrict who can mute users (only 'tara_team')
+    if role != 'tara_team':
+        await update.message.reply_text("You are not authorized to use this command.")
+        logger.warning(f"Unauthorized mute attempt by user {user_id} with role '{role}'.")
+        return
+
+    # Mute the user by adding their ID to the muted_users set
+    target_user_id = None
+
+    # Check if the command is used as /mute to mute self or /mute <id> to mute others
+    if len(context.args) == 0:
+        target_user_id = user_id
+    elif len(context.args) == 1:
+        try:
+            target_user_id = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("Please provide a valid user ID.")
+            return
+    else:
+        await update.message.reply_text("Usage: /mute [user_id]")
+        return
+
+    if target_user_id in muted_users:
+        await update.message.reply_text("This user is already muted.")
+        logger.info(f"Attempt to mute already muted user {target_user_id} by {user_id}.")
+        return
+
+    muted_users.add(target_user_id)
+    save_muted_users()
+
+    if target_user_id == user_id:
+        await update.message.reply_text("You have been muted and can no longer send messages through this bot.")
+        logger.info(f"User {user_id} has muted themselves.")
+    else:
+        # Attempt to get the username of the target user
+        target_username = None
+        for uname, uid in user_data_store.items():
+            if uid == target_user_id:
+                target_username = uname
+                break
+
+        if target_username:
+            await update.message.reply_text(f"User `@{target_username}` has been muted.", parse_mode='Markdown')
+            logger.info(f"User {user_id} has muted user {target_user_id} (@{target_username}).")
+        else:
+            await update.message.reply_text(f"User ID {target_user_id} has been muted.")
+            logger.info(f"User {user_id} has muted user {target_user_id}.")
+
+async def mute_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mute a specific user by their user ID."""
+    # Reuse the mute function logic
+    await mute(update, context)
+
+async def unmute_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Unmute a specific user by their user ID."""
+    user_id = update.message.from_user.id
+    role = get_user_role(user_id)
+
+    # Restrict who can unmute users (only 'tara_team')
+    if role != 'tara_team':
+        await update.message.reply_text("You are not authorized to use this command.")
+        logger.warning(f"Unauthorized unmute attempt by user {user_id} with role '{role}'.")
+        return
+
+    if len(context.args) != 1:
+        await update.message.reply_text("Usage: /unmuteid <user_id>")
+        return
+
+    try:
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Please provide a valid user ID.")
+        return
+
+    if target_user_id in muted_users:
+        muted_users.remove(target_user_id)
+        save_muted_users()
+
+        # Attempt to get the username of the target user
+        target_username = None
+        for uname, uid in user_data_store.items():
+            if uid == target_user_id:
+                target_username = uname
+                break
+
+        if target_username:
+            await update.message.reply_text(f"User `@{target_username}` has been unmuted.", parse_mode='Markdown')
+            logger.info(f"User {user_id} has unmuted user {target_user_id} (@{target_username}).")
+        else:
+            await update.message.reply_text(f"User ID {target_user_id} has been unmuted.")
+            logger.info(f"User {user_id} has unmuted user {target_user_id}.")
+    else:
+        await update.message.reply_text(f"User ID {target_user_id} is not muted.")
+        logger.warning(f"Attempt to unmute user {target_user_id} who is not muted by user {user_id}.")
+
+async def list_muted(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all currently muted users. Restricted to Tara Team."""
+    user_id = update.message.from_user.id
+    role = get_user_role(user_id)
+
+    if role != 'tara_team':
+        await update.message.reply_text("You are not authorized to use this command.")
+        logger.warning(f"Unauthorized access attempt by user {user_id} for /listmuted.")
+        return
+
+    if not muted_users:
+        await update.message.reply_text("No users are currently muted.")
+        return
+
+    muted_list = []
+    for uid in muted_users:
+        username = None
+        for uname, id_ in user_data_store.items():
+            if id_ == uid:
+                username = uname
+                break
+        if username:
+            muted_list.append(f"@{username} (ID: {uid})")
+        else:
+            muted_list.append(f"ID: {uid}")
+
+    muted_users_text = "\n".join(muted_list)
+    await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
+    logger.info(f"User {user_id} requested the list of muted users.")
+
+# ------------------ Conversation Handlers ------------------
+
+# Define the ConversationHandler for specific user commands
+specific_user_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$'), specific_user_trigger)],
+    states={
+        SPECIFIC_USER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_user_message_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
+
+# Define the ConversationHandler for specific team commands
+specific_team_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
+    states={
+        SPECIFIC_TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_team_message_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
+
+# Define the ConversationHandler for general team messages
+team_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-?team-?$'), team_trigger)],
+    states={
+        TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, team_message_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
+
+# Define the ConversationHandler for Tara team messages using -t or -T
+tara_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
+    states={
+        TARA_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tara_message_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
+
+# ------------------ Mute Commands Only for Tara Team ------------------
+
+# These are already defined above:
+# - /mute
+# - /muteid
+# - /unmuteid
+# - /listmuted
+
+# ------------------ Other Command Handlers ------------------
+
+async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger function when a Tara team member sends a specific command."""
     user_id = update.message.from_user.id
     role = get_user_role(user_id)
@@ -309,40 +562,6 @@ async def specific_team_message_handler(update: Update, context: ContextTypes.DE
     await message.reply_text(confirmation, parse_mode='Markdown')
 
     return ConversationHandler.END
-
-async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger function when a Tara team member sends a '-@username' command."""
-    user_id = update.message.from_user.id
-    role = get_user_role(user_id)
-
-    if role != 'tara_team':
-        await update.message.reply_text("You are not authorized to use this command.")
-        logger.warning(f"Unauthorized access attempt by user {user_id} for specific user commands.")
-        return ConversationHandler.END
-
-    message = update.message.text.strip()
-
-    # Extract the username using regex
-    match = re.match(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$', message)
-    if not match:
-        await update.message.reply_text("Invalid command format. Use `-@username`.")
-        logger.warning(f"Invalid command format '{message}' from user {user_id}.")
-        return ConversationHandler.END
-
-    target_username = match.group(1).lower()
-    target_user_id = user_data_store.get(target_username)
-
-    if not target_user_id:
-        await update.message.reply_text(f"User `@{target_username}` not found or hasn't interacted with the bot.", parse_mode='Markdown')
-        logger.warning(f"User '@{target_username}' not found in user data store.")
-        return ConversationHandler.END
-
-    # Store target user ID in user_data for later use
-    context.user_data['target_user_id'] = target_user_id
-
-    logger.info(f"User {user_id} ({role}) is sending a message to user {target_user_id} (@{target_username}).")
-    await update.message.reply_text(f"Write your message for `@{target_username}`.", parse_mode='Markdown')
-    return SPECIFIC_USER_MESSAGE
 
 async def specific_user_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the message intended for a specific user."""
@@ -507,85 +726,167 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Operation cancelled.")
     return ConversationHandler.END
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Provide help information to users."""
-    help_text = (
-        "📘 *Available Commands:*\n\n"
-        "/start - Initialize interaction with the bot.\n"
-        "/listusers - List all registered users (Tara Team only).\n"
-        "/help - Show this help message.\n"
-        "/refresh - Refresh your user information.\n\n"
-        "*Specific Commands for Tara Team:*\n"
-        "-w - Send a message to the Writer Team.\n"
-        "-e - Send a message to the Editor Team.\n"
-        "-mcq - Send a message to the MCQs Team.\n"
-        "-d - Send a message to the Word Team.\n"
-        "-de - Send a message to the Design Team.\n"
-        "-mf - Send a message to the Mind Map & Form Creation Team.\n"
-        "-t - Send a message to the Tara Team.\n"
-        "-@username - Send a direct message to a specific user."
-    )
-    await update.message.reply_text(help_text, parse_mode='Markdown')
-    logger.info(f"User {update.effective_user.id} requested help.")
+# ------------------ Mute Command Handlers ------------------
 
-# Define the ConversationHandler for specific user commands
-specific_user_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$'), specific_user_trigger)],
-    states={
-        SPECIFIC_USER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_user_message_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
+async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the /mute command for Tara Team."""
+    user_id = update.message.from_user.id
+    role = get_user_role(user_id)
 
-# Define the ConversationHandler for specific team commands
-specific_team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
-    states={
-        SPECIFIC_TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_team_message_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# Define the ConversationHandler for general team messages
-team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-?team-?$'), team_trigger)],
-    states={
-        TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, team_message_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# Define the ConversationHandler for Tara team messages using -t or -T
-tara_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
-    states={
-        TARA_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tara_message_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# Define the /refresh command handler
-async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Refresh user information."""
-    user = update.effective_user
-    if not user.username:
-        await update.message.reply_text(
-            "Please set a Telegram username in your profile to refresh your information."
-        )
-        logger.warning(f"User {user.id} has no username and cannot be refreshed.")
+    # Restrict to Tara Team only
+    if role != 'tara_team':
+        await update.message.reply_text("You are not authorized to use this command.")
+        logger.warning(f"Unauthorized mute attempt by user {user_id} with role '{role}'.")
         return
 
-    # Store the username and user_id
-    username_lower = user.username.lower()
-    user_data_store[username_lower] = user.id
-    logger.info(f"User {user.id} with username '{username_lower}' refreshed their info.")
-    
-    # Save to JSON file
-    save_user_data()
+    # Mute self
+    if len(context.args) == 0:
+        target_user_id = user_id
+    elif len(context.args) == 1:
+        # Mute another user by ID
+        try:
+            target_user_id = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("Please provide a valid user ID.")
+            return
+    else:
+        await update.message.reply_text("Usage: /mute [user_id]")
+        return
 
-    await update.message.reply_text(
-        "Your information has been refreshed successfully."
-    )
+    if target_user_id in muted_users:
+        if target_user_id == user_id:
+            await update.message.reply_text("You are already muted.")
+        else:
+            await update.message.reply_text("This user is already muted.")
+        logger.info(f"Attempt to mute already muted user {target_user_id} by {user_id}.")
+        return
+
+    muted_users.add(target_user_id)
+    save_muted_users()
+
+    if target_user_id == user_id:
+        await update.message.reply_text("You have been muted and can no longer send messages through this bot.")
+        logger.info(f"User {user_id} has muted themselves.")
+    else:
+        # Attempt to get the username of the target user
+        target_username = None
+        for uname, uid in user_data_store.items():
+            if uid == target_user_id:
+                target_username = uname
+                break
+
+        if target_username:
+            await update.message.reply_text(f"User `@{target_username}` has been muted.", parse_mode='Markdown')
+            logger.info(f"User {user_id} has muted user {target_user_id} (@{target_username}).")
+        else:
+            await update.message.reply_text(f"User ID {target_user_id} has been muted.")
+            logger.info(f"User {user_id} has muted user {target_user_id}.")
+
+async def mute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the /muteid command for Tara Team."""
+    await mute_command(update, context)
+
+async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the /unmuteid command for Tara Team."""
+    user_id = update.message.from_user.id
+    role = get_user_role(user_id)
+
+    # Restrict to Tara Team only
+    if role != 'tara_team':
+        await update.message.reply_text("You are not authorized to use this command.")
+        logger.warning(f"Unauthorized unmute attempt by user {user_id} with role '{role}'.")
+        return
+
+    if len(context.args) != 1:
+        await update.message.reply_text("Usage: /unmuteid <user_id>")
+        return
+
+    try:
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Please provide a valid user ID.")
+        return
+
+    if target_user_id in muted_users:
+        muted_users.remove(target_user_id)
+        save_muted_users()
+
+        # Attempt to get the username of the target user
+        target_username = None
+        for uname, uid in user_data_store.items():
+            if uid == target_user_id:
+                target_username = uname
+                break
+
+        if target_username:
+            await update.message.reply_text(f"User `@{target_username}` has been unmuted.", parse_mode='Markdown')
+            logger.info(f"User {user_id} has unmuted user {target_user_id} (@{target_username}).")
+        else:
+            await update.message.reply_text(f"User ID {target_user_id} has been unmuted.")
+            logger.info(f"User {user_id} has unmuted user {target_user_id}.")
+    else:
+        await update.message.reply_text(f"User ID {target_user_id} is not muted.")
+        logger.warning(f"Attempt to unmute user {target_user_id} who is not muted by user {user_id}.")
+
+async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the /listmuted command for Tara Team."""
+    user_id = update.message.from_user.id
+    role = get_user_role(user_id)
+
+    if role != 'tara_team':
+        await update.message.reply_text("You are not authorized to use this command.")
+        logger.warning(f"Unauthorized access attempt by user {user_id} for /listmuted.")
+        return
+
+    if not muted_users:
+        await update.message.reply_text("No users are currently muted.")
+        return
+
+    muted_list = []
+    for uid in muted_users:
+        username = None
+        for uname, id_ in user_data_store.items():
+            if id_ == uid:
+                username = uname
+                break
+        if username:
+            muted_list.append(f"@{username} (ID: {uid})")
+        else:
+            muted_list.append(f"ID: {uid}")
+
+    muted_users_text = "\n".join(muted_list)
+    await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
+    logger.info(f"User {user_id} requested the list of muted users.")
+
+# ------------------ Other Helper Functions ------------------
+
+async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger function when a Tara team member sends a specific command."""
+    user_id = update.message.from_user.id
+    role = get_user_role(user_id)
+
+    if role != 'tara_team':
+        await update.message.reply_text("You are not authorized to use this command.")
+        logger.warning(f"Unauthorized access attempt by user {user_id} for specific triggers.")
+        return ConversationHandler.END
+
+    message = update.message.text.lower().strip()
+    target_roles = TRIGGER_TARGET_MAP.get(message)
+
+    if not target_roles:
+        await update.message.reply_text("Invalid trigger. Please try again.")
+        logger.warning(f"Invalid trigger '{message}' from user {user_id}.")
+        return ConversationHandler.END
+
+    # Store target roles in user_data
+    context.user_data['specific_target_roles'] = target_roles
+
+    await update.message.reply_text("Write your message for your team.")
+    return SPECIFIC_TEAM_MESSAGE
+
+# The other handlers (specific_team_message_handler, specific_user_message_handler, etc.) remain unchanged.
+
+# ------------------ Main Function ------------------
 
 def main():
     """Main function to start the Telegram bot."""
@@ -613,6 +914,22 @@ def main():
     refresh_handler = CommandHandler('refresh', refresh)
     application.add_handler(refresh_handler)
 
+    # Add the /mute command handler (only for Tara Team)
+    mute_handler = CommandHandler('mute', mute_command)
+    application.add_handler(mute_handler)
+
+    # Add the /muteid command handler (only for Tara Team)
+    mute_id_handler = CommandHandler('muteid', mute_id_command)
+    application.add_handler(mute_id_handler)
+
+    # Add the /unmuteid command handler (only for Tara Team)
+    unmute_id_handler = CommandHandler('unmuteid', unmute_id_command)
+    application.add_handler(unmute_id_handler)
+
+    # Add the /listmuted command handler (only for Tara Team)
+    list_muted_handler = CommandHandler('listmuted', list_muted_command)
+    application.add_handler(list_muted_handler)
+
     # Add the ConversationHandler for specific user commands
     application.add_handler(specific_user_conv_handler)
 
@@ -626,7 +943,6 @@ def main():
     application.add_handler(tara_conv_handler)
 
     # Handle all other text and document messages, excluding commands
-    # **UPDATED FILTER TO EXCLUDE COMMANDS**
     message_handler = MessageHandler(
         (filters.TEXT & ~filters.COMMAND) | filters.Document.ALL, 
         handle_general_message
