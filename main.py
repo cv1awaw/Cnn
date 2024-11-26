@@ -164,21 +164,38 @@ async def forward_message(bot, message, target_ids, sender_role):
     for user_id in target_ids:
         try:
             # Forward the original message
-            await bot.forward_message(
+            forwarded_message = await bot.forward_message(
                 chat_id=user_id,
                 from_chat_id=message.chat.id,
                 message_id=message.message_id
             )
             logger.info(f"Forwarded message {message.message_id} to {user_id}")
 
+            # Log the forwarded message
+            # Optionally, track forwarded messages if needed for deletion
+            # Example:
+            # sent_messages.append({
+            #     "chat_id": user_id,
+            #     "message_id": forwarded_message.message_id
+            # })
+            # save_sent_messages()
+
             # Send an additional message indicating the sender's role with display name
             role_notification = f"🔄 *This message was sent by **{sender_display_name}**.*"
-            await bot.send_message(
+            notification_message = await bot.send_message(
                 chat_id=user_id,
                 text=role_notification,
                 parse_mode='Markdown'
             )
             logger.info(f"Sent role notification to {user_id}")
+
+            # Optionally, track notification messages if needed for deletion
+            # Example:
+            # sent_messages.append({
+            #     "chat_id": user_id,
+            #     "message_id": notification_message.message_id
+            # })
+            # save_sent_messages()
 
         except Exception as e:
             logger.error(f"Failed to forward message or send role notification to {user_id}: {e}")
@@ -197,6 +214,8 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     choice = query.data
+
+    logger.info(f"Received confirmation choice: '{choice}' from user {query.from_user.id}")
 
     if choice == 'confirm':
         # Proceed to send the message
@@ -494,9 +513,10 @@ specific_user_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$'), specific_user_trigger)],
     states={
         SPECIFIC_USER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_user_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm|cancel)$')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
+    per_user=True,  # Ensure conversations are per-user
 )
 
 # Define the ConversationHandler for specific team commands
@@ -504,9 +524,10 @@ specific_team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
     states={
         SPECIFIC_TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm|cancel)$')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
+    per_user=True,  # Ensure conversations are per-user
 )
 
 # Define the ConversationHandler for general team messages
@@ -514,9 +535,10 @@ team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-?team-?$'), team_trigger)],
     states={
         TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm|cancel)$')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
+    per_user=True,  # Ensure conversations are per-user
 )
 
 # Define the ConversationHandler for Tara team messages using -t or -T
@@ -524,9 +546,10 @@ tara_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
     states={
         TARA_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tara_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm|cancel)$')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
+    per_user=True,  # Ensure conversations are per-user
 )
 
 # ------------------ Command Handlers ------------------
@@ -808,6 +831,21 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
     logger.info(f"User {user_id} requested the list of muted users.")
 
+# ------------------ Error Handler ------------------
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and notify the user."""
+    logger.error(msg="Exception while handling an update:", exc_info=context.error)
+
+    # Notify the user that an error occurred (optional)
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "⚠️ An unexpected error occurred. Please try again later."
+            )
+        except Exception as e:
+            logger.error(f"Failed to send error message to user: {e}")
+
 # ------------------ Main Function ------------------
 
 def main():
@@ -852,27 +890,11 @@ def main():
     list_muted_handler = CommandHandler('listmuted', list_muted_command)
     application.add_handler(list_muted_handler)
 
-    # Add the ConversationHandler for specific user commands
+    # Add the ConversationHandlers
     application.add_handler(specific_user_conv_handler)
-
-    # Add the ConversationHandler for specific team commands
     application.add_handler(specific_team_conv_handler)
-
-    # Add the ConversationHandler for general team messages
     application.add_handler(team_conv_handler)
-
-    # Add the ConversationHandler for Tara team messages (-t)
     application.add_handler(tara_conv_handler)
-
-    # Add the ConversationHandler for confirmation
-    confirmation_handler_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(confirmation_handler)],
-        states={
-            CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)],
-    )
-    application.add_handler(confirmation_handler_conv)
 
     # Handle all other text and document messages, excluding commands
     message_handler = MessageHandler(
@@ -880,6 +902,9 @@ def main():
         handle_general_message
     )
     application.add_handler(message_handler)
+
+    # Register the error handler
+    application.add_error_handler(error_handler)
 
     # Start the Bot
     logger.info("Bot started polling...")
