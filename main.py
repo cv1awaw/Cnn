@@ -37,6 +37,17 @@ ROLE_MAP = {
     'tara_team': TARA_TEAM_IDS,
 }
 
+# Define display names for each role
+ROLE_DISPLAY_NAMES = {
+    'writer': 'Writer Team',
+    'mcqs_team': 'MCQs Team',
+    'checker_team': 'Editor Team',
+    'word_team': 'Digital Writers',
+    'design_team': 'Design Team',
+    'king_team': 'Admin Team',
+    'tara_team': 'Tara Team',  # Assuming you want to keep this as is
+}
+
 # Define target roles for each role
 SENDING_ROLE_TARGETS = {
     'writer': ['mcqs_team', 'checker_team', 'tara_team'],
@@ -57,6 +68,9 @@ def get_user_role(user_id):
 
 async def forward_message(bot, message, target_ids, sender_role):
     """Forward a message to a list of target user IDs and notify about the sender's role."""
+    # Get the display name for the sender's role
+    sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
+
     for user_id in target_ids:
         try:
             # Forward the original message
@@ -67,8 +81,8 @@ async def forward_message(bot, message, target_ids, sender_role):
             )
             logger.info(f"Forwarded message {message.message_id} to {user_id}")
 
-            # Send an additional message indicating the sender's role
-            role_notification = f"🔄 *This message was sent by a **{sender_role}**.*"
+            # Send an additional message indicating the sender's role with display name
+            role_notification = f"🔄 *This message was sent by **{sender_display_name}**.*"
             await bot.send_message(
                 chat_id=user_id,
                 text=role_notification,
