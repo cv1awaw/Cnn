@@ -3,6 +3,8 @@
 import logging
 import os
 import re
+import json
+from pathlib import Path
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -82,7 +84,23 @@ SPECIFIC_TEAM_MESSAGE = 2
 SPECIFIC_USER_MESSAGE = 3
 
 # User data storage: username (lowercase) -> user_id
-user_data_store = {}
+USER_DATA_FILE = Path('user_data.json')
+
+# Load existing user data if the file exists
+if USER_DATA_FILE.exists():
+    with open(USER_DATA_FILE, 'r') as f:
+        user_data_store = json.load(f)
+        # Convert keys to lowercase to maintain consistency
+        user_data_store = {k.lower(): v for k, v in user_data_store.items()}
+        logger.info("Loaded existing user data from user_data.json.")
+else:
+    user_data_store = {}
+
+def save_user_data():
+    """Save the user_data_store to a JSON file."""
+    with open(USER_DATA_FILE, 'w') as f:
+        json.dump(user_data_store, f)
+        logger.info("Saved user data to user_data.json.")
 
 def get_user_role(user_id):
     """Determine the role of a user based on their user ID."""
@@ -132,6 +150,11 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         user_data_store[username.lower()] = user_id
         logger.info(f"Stored username '{username.lower()}' for user ID {user_id}.")
 
+        # Save to JSON file
+        save_user_data()
+    else:
+        logger.info(f"User {user_id} has no username and cannot be targeted.")
+
     role = get_user_role(user_id)
 
     if not role:
@@ -162,115 +185,45 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
     # Forward the message to the aggregated target user IDs with role notification
     await forward_message(context.bot, message, target_ids, sender_role=role)
 
-async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger function when a user sends a general team message."""
-    await update.message.reply_text("Write your message for your team.")
-    return TEAM_MESSAGE
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the /start command."""
+    user = update.effective_user
+    if not user.username:
+        await update.message.reply_text(
+            "Please set a Telegram username in your profile to use specific commands like `-@username`."
+        )
+        logger.warning(f"User {user.id} has no username and cannot be targeted.")
+        return
 
-async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the team message after the general trigger."""
-    message = update.message
-    user_id = message.from_user.id
-    role = get_user_role(user_id)
+    # Store the username and user_id
+    user_data_store[user.username.lower()] = user.id
+    logger.info(f"User {user.id} with username '{user.username.lower()}' started the bot.")
+    
+    # Save to JSON file
+    save_user_data()
 
-    if not role:
-        await message.reply_text("You don't have a role assigned to use this bot.")
-        logger.warning(f"Unauthorized access attempt by user {user_id}")
-        return ConversationHandler.END
-
-    # Determine target roles: sender's role and tara_team
-    target_roles = [role, 'tara_team']
-    target_ids = set()
-    for target_role in target_roles:
-        target_ids.update(ROLE_MAP.get(target_role, []))
-
-    # Exclude the sender's user ID from all forwards
-    target_ids.discard(user_id)
-
-    if not target_ids:
-        await message.reply_text("No recipients found to send your message.")
-        return ConversationHandler.END
-
-    # Forward the message
-    await forward_message(context.bot, message, target_ids, sender_role=role)
-
-    # Prepare display names for confirmation
-    sender_display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
-    # Remove duplicates in target_roles
-    unique_target_roles = list(dict.fromkeys(target_roles))
-    recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in unique_target_roles]
-
-    confirmation = (
-        f"✅ *Your message has been sent from **{sender_display_name}** "
-        f"to **{', '.join(recipient_display_names)}**.*"
+    await update.message.reply_text(
+        f"Hello, {user.first_name}! Welcome to the Team Communication Bot.\n\n"
+        "Feel free to send messages using the available commands."
     )
-    await message.reply_text(confirmation, parse_mode='Markdown')
 
-    return ConversationHandler.END
-
-async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger function when a Tara team member sends a specific command."""
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all stored usernames and their user IDs. Restricted to Tara Team."""
     user_id = update.message.from_user.id
     role = get_user_role(user_id)
-
+    
     if role != 'tara_team':
         await update.message.reply_text("You are not authorized to use this command.")
-        logger.warning(f"Unauthorized access attempt by user {user_id} for specific triggers.")
-        return ConversationHandler.END
+        logger.warning(f"Unauthorized access attempt by user {user_id} for /listusers.")
+        return
 
-    message = update.message.text.lower().strip()
-    target_roles = TRIGGER_TARGET_MAP.get(message)
+    if not user_data_store:
+        await update.message.reply_text("No users have interacted with the bot yet.")
+        return
 
-    if not target_roles:
-        await update.message.reply_text("Invalid trigger. Please try again.")
-        logger.warning(f"Invalid trigger '{message}' from user {user_id}.")
-        return ConversationHandler.END
-
-    # Store target roles in user_data
-    context.user_data['specific_target_roles'] = target_roles
-
-    await update.message.reply_text("Write your message for your team.")
-    return SPECIFIC_TEAM_MESSAGE
-
-async def specific_team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the team message after the specific trigger."""
-    message = update.message
-    user_id = message.from_user.id
-    role = get_user_role(user_id)
-
-    if not role:
-        await message.reply_text("You don't have a role assigned to use this bot.")
-        logger.warning(f"Unauthorized access attempt by user {user_id}")
-        return ConversationHandler.END
-
-    target_roles = context.user_data.get('specific_target_roles', [])
-    target_ids = set()
-
-    for target_role in target_roles:
-        target_ids.update(ROLE_MAP.get(target_role, []))
-
-    # Exclude the sender's user ID from all forwards
-    target_ids.discard(user_id)
-
-    if not target_ids:
-        await message.reply_text("No recipients found to send your message.")
-        logger.warning(f"No recipients found for user {user_id} with role '{role}'.")
-        return ConversationHandler.END
-
-    # Forward the message
-    await forward_message(context.bot, message, target_ids, sender_role=role)
-
-    # Prepare display names for confirmation
-    sender_display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
-    recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
-
-    confirmation = (
-        f"✅ *Your message has been sent from **{sender_display_name}** "
-        f"to **{', '.join(recipient_display_names)}**.*"
-    )
-    await message.reply_text(confirmation, parse_mode='Markdown')
-
-    return ConversationHandler.END
+    user_list = "\n".join([f"@{username}: {uid}" for username, uid in user_data_store.items()])
+    await update.message.reply_text(f"**Registered Users:**\n{user_list}", parse_mode='Markdown')
+    logger.info(f"User {user_id} requested the list of users.")
 
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger function when a Tara team member sends a '-@username' command."""
@@ -285,7 +238,7 @@ async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TY
     message = update.message.text.strip()
 
     # Extract the username using regex
-    match = re.match(r'^-@(\w+)$', message, re.IGNORECASE)
+    match = re.match(r'^-@([A-Za-z0-9_]{5,32})$', message)
     if not match:
         await update.message.reply_text("Invalid command format. Use `-@username`.")
         logger.warning(f"Invalid command format '{message}' from user {user_id}.")
@@ -329,9 +282,19 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
         logger.info(f"Forwarded message {message.message_id} from user {user_id} to user {target_user_id}.")
 
         # Send a confirmation message to the Tara team member
-        confirmation = (
-            f"✅ *Your message has been sent to `@{message.forward_from.username}`.*"
-        )
+        target_username = None
+        for uname, uid in user_data_store.items():
+            if uid == target_user_id:
+                target_username = uname
+                break
+        if target_username:
+            confirmation = (
+                f"✅ *Your message has been sent to `@{target_username}`.*"
+            )
+        else:
+            confirmation = (
+                f"✅ *Your message has been sent to the specified user.*"
+            )
         await message.reply_text(confirmation, parse_mode='Markdown')
         logger.info(f"Confirmation sent to user {user_id} for message to user {target_user_id}.")
 
@@ -348,7 +311,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Define the ConversationHandler for specific user commands
 specific_user_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-@(\w+)$'), specific_user_trigger)],
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-@([A-Za-z0-9_]{5,32})$'), specific_user_trigger)],
     states={
         SPECIFIC_USER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_user_message_handler)],
     },
@@ -382,6 +345,14 @@ def main():
 
     # Build the application
     application = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Add the /start command handler
+    start_handler = CommandHandler('start', start)
+    application.add_handler(start_handler)
+
+    # Add the /listusers command handler
+    list_users_handler = CommandHandler('listusers', list_users)
+    application.add_handler(list_users_handler)
 
     # Add the ConversationHandler for specific user commands
     application.add_handler(specific_user_conv_handler)
