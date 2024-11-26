@@ -19,6 +19,7 @@ from roles import (
     DESIGN_TEAM_IDS,
     KING_TEAM_IDS,
     TARA_TEAM_IDS,
+    MIND_MAP_FORM_CREATOR_IDS,  # Newly added
 )
 
 # Enable logging
@@ -37,6 +38,7 @@ ROLE_MAP = {
     'design_team': DESIGN_TEAM_IDS,
     'king_team': KING_TEAM_IDS,
     'tara_team': TARA_TEAM_IDS,
+    'mind_map_form_creator': MIND_MAP_FORM_CREATOR_IDS,  # Newly added
 }
 
 # Define display names for each role
@@ -47,18 +49,20 @@ ROLE_DISPLAY_NAMES = {
     'word_team': 'Digital Writers',
     'design_team': 'Design Team',
     'king_team': 'Admin Team',
-    'tara_team': 'Tara Team',  # Keeping as is
+    'tara_team': 'Tara Team',
+    'mind_map_form_creator': 'Mind Map & Form Creation Team',  # Newly added
 }
 
 # Define target roles for each role
 SENDING_ROLE_TARGETS = {
-    'writer': ['mcqs_team', 'checker_team', 'tara_team'],
-    'mcqs_team': ['design_team', 'tara_team'],
+    'writer': ['mcqs_team', 'checker_team', 'tara_team', 'mind_map_form_creator'],  # Newly added
+    'mcqs_team': ['design_team', 'tara_team', 'mind_map_form_creator'],            # Newly added
     'checker_team': ['tara_team', 'word_team'],
-    'word_team': ['tara_team', 'design_team'],  # Assuming word_team can only send to tara_team
+    'word_team': ['tara_team', 'design_team'],
     'design_team': ['tara_team', 'king_team'],
     'king_team': ['tara_team'],
     'tara_team': list(ROLE_MAP.keys()),  # Tara can send to all roles
+    'mind_map_form_creator': ['design_team', 'tara_team'],  # Newly added
 }
 
 # Define conversation states
