@@ -154,32 +154,6 @@ def save_muted_users():
     except Exception as e:
         logger.error(f"Failed to save muted users: {e}")
 
-# ------------------ Sent Messages Tracking ------------------
-
-# Sent messages storage: list of {"chat_id": int, "message_id": int}
-SENT_MESSAGES_FILE = Path('sent_messages.json')
-
-# Load existing sent messages if the file exists
-if SENT_MESSAGES_FILE.exists():
-    with open(SENT_MESSAGES_FILE, 'r') as f:
-        try:
-            sent_messages = json.load(f)
-            logger.info("Loaded existing sent messages from sent_messages.json.")
-        except json.JSONDecodeError:
-            sent_messages = []
-            logger.error("sent_messages.json is not a valid JSON file. Starting with an empty sent messages list.")
-else:
-    sent_messages = []
-
-def save_sent_messages():
-    """Save the sent_messages list to a JSON file."""
-    try:
-        with open(SENT_MESSAGES_FILE, 'w') as f:
-            json.dump(sent_messages, f)
-            logger.info("Saved sent messages to sent_messages.json.")
-    except Exception as e:
-        logger.error(f"Failed to save sent messages: {e}")
-
 # ------------------ Message Forwarding ------------------
 
 async def forward_message(bot, message, target_ids, sender_role):
@@ -190,35 +164,21 @@ async def forward_message(bot, message, target_ids, sender_role):
     for user_id in target_ids:
         try:
             # Forward the original message
-            forwarded_message = await bot.forward_message(
+            await bot.forward_message(
                 chat_id=user_id,
                 from_chat_id=message.chat.id,
                 message_id=message.message_id
             )
             logger.info(f"Forwarded message {message.message_id} to {user_id}")
 
-            # Log the forwarded message
-            sent_messages.append({
-                "chat_id": user_id,
-                "message_id": forwarded_message.message_id
-            })
-            save_sent_messages()
-
             # Send an additional message indicating the sender's role with display name
             role_notification = f"🔄 *This message was sent by **{sender_display_name}**.*"
-            notification_message = await bot.send_message(
+            await bot.send_message(
                 chat_id=user_id,
                 text=role_notification,
                 parse_mode='Markdown'
             )
             logger.info(f"Sent role notification to {user_id}")
-
-            # Optionally, log the notification message as well if you want to delete it later
-            sent_messages.append({
-                "chat_id": user_id,
-                "message_id": notification_message.message_id
-            })
-            save_sent_messages()
 
         except Exception as e:
             logger.error(f"Failed to forward message or send role notification to {user_id}: {e}")
@@ -690,8 +650,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/mute - Mute yourself or another user.\n"
         "/muteid <user_id> - Mute a specific user by their ID.\n"
         "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
-        "/listmuted - List all currently muted users.\n"
-        "/delete - Delete all messages the bot has sent."
+        "/listmuted - List all currently muted users."
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
     logger.info(f"User {update.effective_user.id} requested help.")
@@ -849,45 +808,6 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
     logger.info(f"User {user_id} requested the list of muted users.")
 
-# ------------------ Delete Command Handler ------------------
-
-async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the /delete command for Tara Team to delete all sent messages."""
-    user_id = update.message.from_user.id
-    role = get_user_role(user_id)
-
-    # Restrict to Tara Team only
-    if role != 'tara_team':
-        await update.message.reply_text("You are not authorized to use this command.")
-        logger.warning(f"Unauthorized delete attempt by user {user_id} with role '{role}'.")
-        return
-
-    if not sent_messages:
-        await update.message.reply_text("There are no messages to delete.")
-        logger.info(f"User {user_id} attempted to delete messages, but none are recorded.")
-        return
-
-    delete_count = 0
-    failed_deletions = []
-
-    for msg in sent_messages.copy():  # Use a copy to modify the list while iterating
-        try:
-            await context.bot.delete_message(chat_id=msg['chat_id'], message_id=msg['message_id'])
-            logger.info(f"Deleted message {msg['message_id']} from chat {msg['chat_id']}.")
-            sent_messages.remove(msg)
-            delete_count += 1
-        except Exception as e:
-            logger.error(f"Failed to delete message {msg['message_id']} from chat {msg['chat_id']}: {e}")
-            failed_deletions.append(f"Chat ID: {msg['chat_id']}, Message ID: {msg['message_id']}")
-
-    save_sent_messages()
-
-    if delete_count > 0:
-        await update.message.reply_text(f"✅ Successfully deleted {delete_count} messages.")
-    if failed_deletions:
-        failed_text = "\n".join(failed_deletions)
-        await update.message.reply_text(f"⚠️ Failed to delete the following messages:\n{failed_text}")
-
 # ------------------ Main Function ------------------
 
 def main():
@@ -932,10 +852,6 @@ def main():
     list_muted_handler = CommandHandler('listmuted', list_muted_command)
     application.add_handler(list_muted_handler)
 
-    # Add the /delete command handler (only for Tara Team)
-    delete_handler = CommandHandler('delete', delete_command)
-    application.add_handler(delete_handler)
-
     # Add the ConversationHandler for specific user commands
     application.add_handler(specific_user_conv_handler)
 
@@ -947,6 +863,16 @@ def main():
 
     # Add the ConversationHandler for Tara team messages (-t)
     application.add_handler(tara_conv_handler)
+
+    # Add the ConversationHandler for confirmation
+    confirmation_handler_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(confirmation_handler)],
+        states={
+            CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    )
+    application.add_handler(confirmation_handler_conv)
 
     # Handle all other text and document messages, excluding commands
     message_handler = MessageHandler(
