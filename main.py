@@ -5,7 +5,7 @@ import os
 import re
 import json
 from pathlib import Path
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -13,6 +13,7 @@ from telegram.ext import (
     filters,
     ConversationHandler,
     CommandHandler,
+    CallbackQueryHandler,
 )
 from roles import (
     WRITER_IDS,
@@ -89,7 +90,8 @@ SENDING_ROLE_TARGETS = {
 TEAM_MESSAGE = 1
 SPECIFIC_TEAM_MESSAGE = 2
 SPECIFIC_USER_MESSAGE = 3
-TARA_MESSAGE = 4  # Newly added state for Tara messages
+TARA_MESSAGE = 4  # Newly added
+CONFIRMATION = 5  # Newly added state for confirmation
 
 # ------------------ User Data Storage ------------------
 
@@ -188,6 +190,58 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Operation cancelled.")
     return ConversationHandler.END
 
+# Confirmation Handler Functions
+
+async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the user's confirmation response."""
+    query = update.callback_query
+    await query.answer()
+    choice = query.data
+
+    if choice == 'confirm':
+        # Proceed to send the message
+        message_to_send = context.user_data.get('message_to_send')
+        target_ids = context.user_data.get('target_ids')
+        sender_role = context.user_data.get('sender_role')
+
+        if not message_to_send or not target_ids or not sender_role:
+            await query.edit_message_text("An error occurred. Please try again.")
+            logger.error("Missing data for forwarding message.")
+            return ConversationHandler.END
+
+        # Forward the message
+        await forward_message(context.bot, message_to_send, target_ids, sender_role)
+
+        # Prepare display names for confirmation
+        sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
+        target_roles = context.user_data.get('target_roles', [])
+        recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
+
+        confirmation_text = (
+            f"✅ *Your message has been sent from **{sender_display_name}** "
+            f"to **{', '.join(recipient_display_names)}**.*"
+        )
+        await query.edit_message_text(confirmation_text, parse_mode='Markdown')
+        logger.info(f"User {query.from_user.id} confirmed and sent the message.")
+    elif choice == 'cancel':
+        await query.edit_message_text("Operation cancelled.")
+        logger.info(f"User {query.from_user.id} cancelled the message sending.")
+    else:
+        await query.edit_message_text("Invalid choice.")
+        logger.warning(f"User {query.from_user.id} sent invalid confirmation choice: {choice}")
+
+    return ConversationHandler.END
+
+def get_confirmation_keyboard():
+    """Return an inline keyboard for confirmation."""
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Confirm", callback_data='confirm'),
+            InlineKeyboardButton("❌ Cancel", callback_data='cancel'),
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 # Define all handler functions that are referenced in ConversationHandlers
 
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -215,14 +269,16 @@ async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TY
         logger.warning(f"Tara Team member {user_id} attempted to target non-existent user @{target_username}.")
         return ConversationHandler.END
 
-    # Store target user ID in user_data
+    # Store target user ID and other necessary data in user_data
     context.user_data['target_user_id'] = target_user_id
+    context.user_data['target_username'] = target_username
+    context.user_data['sender_role'] = role
 
     await update.message.reply_text(f"Write your message for user `@{target_username}`.", parse_mode='Markdown')
     return SPECIFIC_USER_MESSAGE
 
 async def specific_user_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the message intended for a specific user."""
+    """Handle the message intended for a specific user and ask for confirmation."""
     message = update.message
     user_id = message.from_user.id
     role = get_user_role(user_id)
@@ -233,39 +289,26 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
         return ConversationHandler.END
 
     target_user_id = context.user_data.get('target_user_id')
+    target_username = context.user_data.get('target_username')
+
     if not target_user_id:
         await message.reply_text("An error occurred. Please try again.")
         logger.error(f"No target user ID found in user_data for user {user_id}.")
         return ConversationHandler.END
 
-    # Forward the message to the specific user
-    try:
-        await message.forward(chat_id=target_user_id)
-        logger.info(f"Forwarded message {message.message_id} from user {user_id} to user {target_user_id}.")
+    # Store the message and targets for confirmation
+    context.user_data['message_to_send'] = message
+    context.user_data['target_ids'] = [target_user_id]
+    context.user_data['target_roles'] = ['specific_user']
 
-        # Retrieve the target username for confirmation
-        target_username = None
-        for uname, uid in user_data_store.items():
-            if uid == target_user_id:
-                target_username = uname
-                break
+    confirmation_text = (
+        f"📩 *You are about to send the following message to `@{target_username}`:*\n\n"
+        f"{message.text}\n\n"
+        "Do you want to send this message?"
+    )
+    await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=get_confirmation_keyboard())
 
-        if target_username:
-            confirmation = (
-                f"✅ *Your message has been sent to `@{target_username}`.*"
-            )
-        else:
-            confirmation = (
-                f"✅ *Your message has been sent to the specified user.*"
-            )
-        await message.reply_text(confirmation, parse_mode='Markdown')
-        logger.info(f"Confirmation sent to user {user_id} for message to user {target_user_id}.")
-
-    except Exception as e:
-        logger.error(f"Failed to forward message to user {target_user_id}: {e}")
-        await message.reply_text("Failed to send your message. Please try again later.")
-
-    return ConversationHandler.END
+    return CONFIRMATION
 
 async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger function when a Tara team member sends a specific team command."""
@@ -287,12 +330,13 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
 
     # Store target roles in user_data
     context.user_data['specific_target_roles'] = target_roles
+    context.user_data['sender_role'] = role
 
     await update.message.reply_text("Write your message for your team.")
     return SPECIFIC_TEAM_MESSAGE
 
 async def specific_team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the team message after the specific trigger."""
+    """Handle the team message after the specific trigger and ask for confirmation."""
     message = update.message
     user_id = message.from_user.id
     role = get_user_role(user_id)
@@ -316,20 +360,19 @@ async def specific_team_message_handler(update: Update, context: ContextTypes.DE
         logger.warning(f"No recipients found for user {user_id} with role '{role}'.")
         return ConversationHandler.END
 
-    # Forward the message
-    await forward_message(context.bot, message, target_ids, sender_role=role)
+    # Store the message and targets for confirmation
+    context.user_data['message_to_send'] = message
+    context.user_data['target_ids'] = list(target_ids)
+    context.user_data['target_roles'] = target_roles
 
-    # Prepare display names for confirmation
-    sender_display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
-    recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
-
-    confirmation = (
-        f"✅ *Your message has been sent from **{sender_display_name}** "
-        f"to **{', '.join(recipient_display_names)}**.*"
+    confirmation_text = (
+        f"📩 *You are about to send the following message to **{', '.join([ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles])}**:*\n\n"
+        f"{message.text}\n\n"
+        "Do you want to send this message?"
     )
-    await message.reply_text(confirmation, parse_mode='Markdown')
+    await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=get_confirmation_keyboard())
 
-    return ConversationHandler.END
+    return CONFIRMATION
 
 async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the general team trigger."""
@@ -351,12 +394,13 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Store target roles in user_data for use in the next step
     context.user_data['specific_target_roles'] = target_roles
+    context.user_data['sender_role'] = role
 
     await update.message.reply_text("Write your message for your team.")
     return TEAM_MESSAGE
 
 async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the team message after the general trigger."""
+    """Handle the team message after the general trigger and ask for confirmation."""
     message = update.message
     user_id = message.from_user.id
     role = get_user_role(user_id)
@@ -380,20 +424,19 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.warning(f"No recipients found for user {user_id} with role '{role}'.")
         return ConversationHandler.END
 
-    # Forward the message
-    await forward_message(context.bot, message, target_ids, sender_role=role)
+    # Store the message and targets for confirmation
+    context.user_data['message_to_send'] = message
+    context.user_data['target_ids'] = list(target_ids)
+    context.user_data['target_roles'] = target_roles
 
-    # Prepare display names for confirmation
-    sender_display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
-    recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
-
-    confirmation = (
-        f"✅ *Your message has been sent from **{sender_display_name}** "
-        f"to **{', '.join(recipient_display_names)}**.*"
+    confirmation_text = (
+        f"📩 *You are about to send the following message to **{', '.join([ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles])}**:*\n\n"
+        f"{message.text}\n\n"
+        "Do you want to send this message?"
     )
-    await message.reply_text(confirmation, parse_mode='Markdown')
+    await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=get_confirmation_keyboard())
 
-    return ConversationHandler.END
+    return CONFIRMATION
 
 async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the -t trigger to send a message to Tara team."""
@@ -405,10 +448,11 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Therefore, we'll handle it separately to ensure no forwarding occurs
 
     await update.message.reply_text("Write your message for the Tara Team.")
+    context.user_data['sender_role'] = role
     return TARA_MESSAGE
 
 async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the message intended for Tara team."""
+    """Handle the message intended for Tara team and ask for confirmation."""
     message = update.message
     user_id = message.from_user.id
     role = get_user_role(user_id)
@@ -429,20 +473,19 @@ async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.warning(f"No recipients found for user {user_id} with role '{role}'.")
         return ConversationHandler.END
 
-    # Forward the message to Tara team
-    await forward_message(context.bot, message, target_ids, sender_role=role)
+    # Store the message and targets for confirmation
+    context.user_data['message_to_send'] = message
+    context.user_data['target_ids'] = list(target_ids)
+    context.user_data['target_roles'] = target_roles
 
-    # Prepare display names for confirmation
-    sender_display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
-    recipient_display_names = [ROLE_DISPLAY_NAMES.get('tara_team', 'Tara Team')]
-
-    confirmation = (
-        f"✅ *Your message has been sent from **{sender_display_name}** "
-        f"to **{', '.join(recipient_display_names)}**.*"
+    confirmation_text = (
+        f"📩 *You are about to send the following message to **Tara Team**:*\n\n"
+        f"{message.text}\n\n"
+        "Do you want to send this message?"
     )
-    await message.reply_text(confirmation, parse_mode='Markdown')
+    await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=get_confirmation_keyboard())
 
-    return ConversationHandler.END
+    return CONFIRMATION
 
 # ------------------ Conversation Handlers ------------------
 
@@ -451,6 +494,7 @@ specific_user_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$'), specific_user_trigger)],
     states={
         SPECIFIC_USER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_user_message_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -460,6 +504,7 @@ specific_team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
     states={
         SPECIFIC_TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_team_message_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -469,6 +514,7 @@ team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-?team-?$'), team_trigger)],
     states={
         TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, team_message_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -478,6 +524,7 @@ tara_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
     states={
         TARA_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tara_message_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -535,20 +582,20 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         await message.reply_text("No recipients found to send your message.")
         return
 
-    # Log the forwarding action
-    logger.info(f"Forwarding message from '{role}' to roles: {target_roles}")
+    # Store the message and targets for confirmation
+    context.user_data['message_to_send'] = message
+    context.user_data['target_ids'] = list(target_ids)
+    context.user_data['target_roles'] = target_roles
+    context.user_data['sender_role'] = role
 
-    # Forward the message to the aggregated target user IDs with role notification
-    await forward_message(context.bot, message, target_ids, sender_role=role)
-
-    # Optionally, send a confirmation to the sender
-    sender_display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
-    recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
-    confirmation = (
-        f"✅ *Your message has been sent from **{sender_display_name}** "
-        f"to **{', '.join(recipient_display_names)}**.*"
+    confirmation_text = (
+        f"📩 *You are about to send the following message to **{', '.join([ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles])}**:*\n\n"
+        f"{message.text}\n\n"
+        "Do you want to send this message?"
     )
-    await message.reply_text(confirmation, parse_mode='Markdown')
+    await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=get_confirmation_keyboard())
+
+    return CONFIRMATION
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /start command."""
@@ -600,7 +647,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help - Show this help message.\n"
         "/refresh - Refresh your user information.\n\n"
         "*Specific Commands for Tara Team:*\n"
-        "/mute - Mute yourself.\n"
+        "/mute - Mute yourself or another user.\n"
         "/muteid <user_id> - Mute a specific user by their ID.\n"
         "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
         "/listmuted - List all currently muted users."
@@ -816,6 +863,16 @@ def main():
 
     # Add the ConversationHandler for Tara team messages (-t)
     application.add_handler(tara_conv_handler)
+
+    # Add the ConversationHandler for confirmation
+    confirmation_handler_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(confirmation_handler)],
+        states={
+            CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    )
+    application.add_handler(confirmation_handler_conv)
 
     # Handle all other text and document messages, excluding commands
     message_handler = MessageHandler(
