@@ -225,6 +225,70 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"**Registered Users:**\n{user_list}", parse_mode='Markdown')
     logger.info(f"User {user_id} requested the list of users.")
 
+async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger function when a Tara team member sends a specific command."""
+    user_id = update.message.from_user.id
+    role = get_user_role(user_id)
+
+    if role != 'tara_team':
+        await update.message.reply_text("You are not authorized to use this command.")
+        logger.warning(f"Unauthorized access attempt by user {user_id} for specific triggers.")
+        return ConversationHandler.END
+
+    message = update.message.text.lower().strip()
+    target_roles = TRIGGER_TARGET_MAP.get(message)
+
+    if not target_roles:
+        await update.message.reply_text("Invalid trigger. Please try again.")
+        logger.warning(f"Invalid trigger '{message}' from user {user_id}.")
+        return ConversationHandler.END
+
+    # Store target roles in user_data
+    context.user_data['specific_target_roles'] = target_roles
+
+    await update.message.reply_text("Write your message for your team.")
+    return SPECIFIC_TEAM_MESSAGE
+
+async def specific_team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the team message after the specific trigger."""
+    message = update.message
+    user_id = message.from_user.id
+    role = get_user_role(user_id)
+
+    if not role:
+        await message.reply_text("You don't have a role assigned to use this bot.")
+        logger.warning(f"Unauthorized access attempt by user {user_id}")
+        return ConversationHandler.END
+
+    target_roles = context.user_data.get('specific_target_roles', [])
+    target_ids = set()
+
+    for target_role in target_roles:
+        target_ids.update(ROLE_MAP.get(target_role, []))
+
+    # Exclude the sender's user ID from all forwards
+    target_ids.discard(user_id)
+
+    if not target_ids:
+        await message.reply_text("No recipients found to send your message.")
+        logger.warning(f"No recipients found for user {user_id} with role '{role}'.")
+        return ConversationHandler.END
+
+    # Forward the message
+    await forward_message(context.bot, message, target_ids, sender_role=role)
+
+    # Prepare display names for confirmation
+    sender_display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
+    recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
+
+    confirmation = (
+        f"✅ *Your message has been sent from **{sender_display_name}** "
+        f"to **{', '.join(recipient_display_names)}**.*"
+    )
+    await message.reply_text(confirmation, parse_mode='Markdown')
+
+    return ConversationHandler.END
+
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger function when a Tara team member sends a '-@username' command."""
     user_id = update.message.from_user.id
@@ -281,12 +345,13 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
         await message.forward(chat_id=target_user_id)
         logger.info(f"Forwarded message {message.message_id} from user {user_id} to user {target_user_id}.")
 
-        # Send a confirmation message to the Tara team member
+        # Retrieve the target username for confirmation
         target_username = None
         for uname, uid in user_data_store.items():
             if uid == target_user_id:
                 target_username = uname
                 break
+
         if target_username:
             confirmation = (
                 f"✅ *Your message has been sent to `@{target_username}`.*"
@@ -308,6 +373,25 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the conversation."""
     await update.message.reply_text("Operation cancelled.")
     return ConversationHandler.END
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Provide help information to users."""
+    help_text = (
+        "📘 *Available Commands:*\n\n"
+        "/start - Initialize interaction with the bot.\n"
+        "/listusers - List all registered users (Tara Team only).\n"
+        "/refresh - Refresh your user information.\n\n"
+        "*Specific Commands for Tara Team:*\n"
+        "-w - Send a message to the Writer Team.\n"
+        "-e - Send a message to the Editor Team.\n"
+        "-mcq - Send a message to the MCQs Team.\n"
+        "-d - Send a message to the Word Team.\n"
+        "-de - Send a message to the Design Team.\n"
+        "-mf - Send a message to the Mind Map & Form Creation Team.\n"
+        "-@username - Send a direct message to a specific user."
+    )
+    await update.message.reply_text(help_text, parse_mode='Markdown')
+    logger.info(f"User {update.effective_user.id} requested help.")
 
 # Define the ConversationHandler for specific user commands
 specific_user_conv_handler = ConversationHandler(
@@ -353,6 +437,10 @@ def main():
     # Add the /listusers command handler
     list_users_handler = CommandHandler('listusers', list_users)
     application.add_handler(list_users_handler)
+
+    # Add the /help command handler
+    help_handler = CommandHandler('help', help_command)
+    application.add_handler(help_handler)
 
     # Add the ConversationHandler for specific user commands
     application.add_handler(specific_user_conv_handler)
