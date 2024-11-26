@@ -53,20 +53,31 @@ ROLE_DISPLAY_NAMES = {
     'mind_map_form_creator': 'Mind Map & Form Creation Team',  # Newly added
 }
 
+# Define trigger to target roles mapping
+TRIGGER_TARGET_MAP = {
+    '-w': ['writer'],
+    '-e': ['checker_team'],  # Editor Team
+    '-mcq': ['mcqs_team'],
+    '-d': ['word_team'],
+    '-de': ['design_team'],
+    '-mf': ['mind_map_form_creator'],
+}
+
 # Define target roles for each role
 SENDING_ROLE_TARGETS = {
-    'writer': ['mcqs_team', 'checker_team', 'tara_team', 'mind_map_form_creator'],  # Newly added
-    'mcqs_team': ['design_team', 'tara_team', 'mind_map_form_creator'],            # Newly added
+    'writer': ['mcqs_team', 'checker_team', 'tara_team', 'mind_map_form_creator'],
+    'mcqs_team': ['design_team', 'tara_team', 'mind_map_form_creator'],
     'checker_team': ['tara_team', 'word_team'],
     'word_team': ['tara_team', 'design_team'],
     'design_team': ['tara_team', 'king_team'],
     'king_team': ['tara_team'],
     'tara_team': list(ROLE_MAP.keys()),  # Tara can send to all roles
-    'mind_map_form_creator': ['design_team', 'tara_team'],  # Newly added
+    'mind_map_form_creator': ['design_team', 'tara_team'],
 }
 
 # Define conversation states
 TEAM_MESSAGE = 1
+SPECIFIC_TEAM_MESSAGE = 2
 
 def get_user_role(user_id):
     """Determine the role of a user based on their user ID."""
@@ -129,6 +140,10 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
     # Exclude the sender's user ID from all forwards
     target_ids.discard(user_id)
 
+    if not target_ids:
+        await message.reply_text("No recipients found to send your message.")
+        return
+
     # Log the forwarding action
     logger.info(f"Forwarding message from '{role}' to roles: {target_roles}")
 
@@ -160,6 +175,10 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     # Exclude the sender's user ID from all forwards
     target_ids.discard(user_id)
 
+    if not target_ids:
+        await message.reply_text("No recipients found to send your message.")
+        return ConversationHandler.END
+
     # Forward the message
     await forward_message(context.bot, message, target_ids, sender_role=role)
 
@@ -177,16 +196,88 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     return ConversationHandler.END
 
+async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger function when a Tara team member sends a specific command."""
+    user_id = update.message.from_user.id
+    role = get_user_role(user_id)
+
+    if role != 'tara_team':
+        await update.message.reply_text("You are not authorized to use this command.")
+        logger.warning(f"Unauthorized access attempt by user {user_id} for specific triggers.")
+        return ConversationHandler.END
+
+    message = update.message.text.lower().strip()
+    target_roles = TRIGGER_TARGET_MAP.get(message)
+
+    if not target_roles:
+        await update.message.reply_text("Invalid trigger. Please try again.")
+        logger.warning(f"Invalid trigger '{message}' from user {user_id}.")
+        return ConversationHandler.END
+
+    # Store target roles in user_data
+    context.user_data['specific_target_roles'] = target_roles
+
+    await update.message.reply_text("Write your message for your team.")
+    return SPECIFIC_TEAM_MESSAGE
+
+async def specific_team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the team message after the specific trigger."""
+    message = update.message
+    user_id = message.from_user.id
+    role = get_user_role(user_id)
+
+    if not role:
+        await message.reply_text("You don't have a role assigned to use this bot.")
+        logger.warning(f"Unauthorized access attempt by user {user_id}")
+        return ConversationHandler.END
+
+    target_roles = context.user_data.get('specific_target_roles', [])
+    target_ids = set()
+
+    for target_role in target_roles:
+        target_ids.update(ROLE_MAP.get(target_role, []))
+
+    # Exclude the sender's user ID from all forwards
+    target_ids.discard(user_id)
+
+    if not target_ids:
+        await message.reply_text("No recipients found to send your message.")
+        return ConversationHandler.END
+
+    # Forward the message
+    await forward_message(context.bot, message, target_ids, sender_role=role)
+
+    # Prepare display names for confirmation
+    sender_display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
+    recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
+
+    confirmation = (
+        f"✅ *Your message has been sent from **{sender_display_name}** "
+        f"to **{', '.join(recipient_display_names)}**.*"
+    )
+    await message.reply_text(confirmation, parse_mode='Markdown')
+
+    return ConversationHandler.END
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the conversation."""
     await update.message.reply_text("Operation cancelled.")
     return ConversationHandler.END
 
-# Define the ConversationHandler
+# Define the ConversationHandler for general team messages
 team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)-team-?'), team_trigger)],
     states={
         TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, team_message_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
+
+# Define the ConversationHandler for specific commands by Tara team
+specific_team_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
+    states={
+        SPECIFIC_TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_team_message_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -201,7 +292,10 @@ def main():
     # Build the application
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Add the ConversationHandler for team messages
+    # Add the ConversationHandler for specific team commands
+    application.add_handler(specific_team_conv_handler)
+
+    # Add the ConversationHandler for general team messages
     application.add_handler(team_conv_handler)
 
     # Handle all other text and document messages
