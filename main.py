@@ -238,8 +238,6 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     choice = query.data
 
-    logger.info(f"Received confirmation choice: '{choice}' from user {query.from_user.id}")
-
     if choice == 'confirm':
         # Proceed to send the message
         message_to_send = context.user_data.get('message_to_send')
@@ -536,10 +534,9 @@ specific_user_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$'), specific_user_trigger)],
     states={
         SPECIFIC_USER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_user_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm|cancel)$')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    per_user=True,  # Explicitly set per_user to True
 )
 
 # Define the ConversationHandler for specific team commands
@@ -547,10 +544,9 @@ specific_team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
     states={
         SPECIFIC_TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm|cancel)$')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    per_user=True,  # Explicitly set per_user to True
 )
 
 # Define the ConversationHandler for general team messages
@@ -558,10 +554,9 @@ team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-?team-?$'), team_trigger)],
     states={
         TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm|cancel)$')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    per_user=True,  # Explicitly set per_user to True
 )
 
 # Define the ConversationHandler for Tara team messages using -t or -T
@@ -569,10 +564,9 @@ tara_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
     states={
         TARA_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tara_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm|cancel)$')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    per_user=True,  # Explicitly set per_user to True
 )
 
 # ------------------ Command Handlers ------------------
@@ -894,21 +888,6 @@ async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         failed_text = "\n".join(failed_deletions)
         await update.message.reply_text(f"⚠️ Failed to delete the following messages:\n{failed_text}")
 
-# ------------------ Error Handler ------------------
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Log the error and notify the user."""
-    logger.error(msg="Exception while handling an update:", exc_info=context.error)
-
-    # Notify the user that an error occurred (optional)
-    if isinstance(update, Update) and update.effective_message:
-        try:
-            await update.effective_message.reply_text(
-                "⚠️ An unexpected error occurred. Please try again later."
-            )
-        except Exception as e:
-            logger.error(f"Failed to send error message to user: {e}")
-
 # ------------------ Main Function ------------------
 
 def main():
@@ -975,9 +954,6 @@ def main():
         handle_general_message
     )
     application.add_handler(message_handler)
-
-    # Register the error handler
-    application.add_error_handler(error_handler)
 
     # Start the Bot
     logger.info("Bot started polling...")
