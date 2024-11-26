@@ -67,7 +67,7 @@ async def forward_message(bot, message, target_ids):
             logger.error(f"Failed to forward message to {user_id}: {e}")
 
 async def handle_role_message(bot, chat_id, message_text, role):
-    """Handle messages prefixed with -role and send them to the sender's team only."""
+    """Handle messages prefixed with -role and send them to the sender's team and tara_team."""
     # Extract the actual message by removing the prefix
     actual_message = message_text[len('-role'):].strip()
     if not actual_message:
@@ -75,19 +75,32 @@ async def handle_role_message(bot, chat_id, message_text, role):
         return
 
     # Get the list of user IDs for the sender's role
-    target_ids = ROLE_MAP.get(role, [])
+    target_ids = ROLE_MAP.get(role, []).copy()  # Copy to avoid modifying the original list
 
-    # Optionally, you might want to exclude the sender from receiving their own message
+    # Optionally, exclude the sender from receiving their own message
     # Uncomment the following line if needed:
     # target_ids = [uid for uid in target_ids if uid != chat_id]
 
-    # Send the message to each target user
+    # Send the message to each target user in the sender's team
     for user_id in target_ids:
         try:
             await bot.send_message(chat_id=user_id, text=f"[{role}] {actual_message}")
             logger.info(f"Sent role-specific message to {user_id}")
         except Exception as e:
             logger.error(f"Failed to send role-specific message to {user_id}: {e}")
+
+    # Now, send the message to tara_team with role information
+    tara_ids = ROLE_MAP.get('tara_team', [])
+    if tara_ids:
+        tara_message = f"[{role}] {actual_message}"
+        for tara_id in tara_ids:
+            try:
+                await bot.send_message(chat_id=tara_id, text=tara_message)
+                logger.info(f"Sent message to tara_team member {tara_id}")
+            except Exception as e:
+                logger.error(f"Failed to send message to tara_team member {tara_id}: {e}")
+    else:
+        logger.warning("No members found in tara_team.")
 
 async def forward_message_to_targets(bot, message, target_ids):
     """Forward the actual message to target user IDs."""
