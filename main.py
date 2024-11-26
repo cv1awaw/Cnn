@@ -1,5 +1,3 @@
-# main.py
-
 import logging
 import os
 from telegram import Update
@@ -68,6 +66,42 @@ async def forward_message(bot, message, target_ids):
         except Exception as e:
             logger.error(f"Failed to forward message to {user_id}: {e}")
 
+async def handle_role_message(bot, chat_id, message_text, role):
+    """Handle messages prefixed with -role and send them to the sender's team only."""
+    # Extract the actual message by removing the prefix
+    actual_message = message_text[len('-role'):].strip()
+    if not actual_message:
+        await bot.send_message(chat_id=chat_id, text="Please provide a message after '-role'.")
+        return
+
+    # Get the list of user IDs for the sender's role
+    target_ids = ROLE_MAP.get(role, [])
+
+    # Optionally, you might want to exclude the sender from receiving their own message
+    # Uncomment the following line if needed:
+    # target_ids = [uid for uid in target_ids if uid != chat_id]
+
+    # Send the message to each target user
+    for user_id in target_ids:
+        try:
+            await bot.send_message(chat_id=user_id, text=f"[{role}] {actual_message}")
+            logger.info(f"Sent role-specific message to {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send role-specific message to {user_id}: {e}")
+
+async def forward_message_to_targets(bot, message, target_ids):
+    """Forward the actual message to target user IDs."""
+    try:
+        for user_id in target_ids:
+            await bot.copy_message(
+                chat_id=user_id,
+                from_chat_id=message.chat.id,
+                message_id=message.message_id
+            )
+            logger.info(f"Copied message {message.message_id} to {user_id}")
+    except Exception as e:
+        logger.error(f"Failed to copy message to {user_id}: {e}")
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming messages and forward them based on user roles."""
     message = update.message
@@ -84,23 +118,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Received message from user {user_id} with role '{role}'")
 
-    # Determine target roles based on sender's role
-    target_roles = SENDING_ROLE_TARGETS.get(role, [])
+    message_text = message.text or ""
 
-    # Aggregate target user IDs from target roles
-    target_ids = set()
-    for target_role in target_roles:
-        target_ids.update(ROLE_MAP.get(target_role, []))
+    if message_text.startswith('-role'):
+        # Handle role-specific message
+        logger.info(f"Handling role-specific message from '{role}'")
+        await handle_role_message(context.bot, message.chat.id, message_text, role)
+    else:
+        # Determine target roles based on sender's role
+        target_roles = SENDING_ROLE_TARGETS.get(role, [])
 
-    # If the sender is not tara_team, exclude their own user ID from the targets
-    if role != 'tara_team':
-        target_ids.discard(user_id)
+        # Aggregate target user IDs from target roles
+        target_ids = set()
+        for target_role in target_roles:
+            target_ids.update(ROLE_MAP.get(target_role, []))
 
-    # Log the forwarding action
-    logger.info(f"Forwarding message from '{role}' to roles: {target_roles}")
+        # If the sender is not tara_team, exclude their own user ID from the targets
+        if role != 'tara_team':
+            target_ids.discard(user_id)
 
-    # Forward the message to the aggregated target user IDs
-    await forward_message(context.bot, message, target_ids)
+        # Log the forwarding action
+        logger.info(f"Forwarding message from '{role}' to roles: {target_roles}")
+
+        # Forward the message to the aggregated target user IDs
+        await forward_message_to_targets(context.bot, message, target_ids)
 
 def main():
     """Main function to start the Telegram bot."""
