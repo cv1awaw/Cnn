@@ -171,15 +171,6 @@ async def forward_message(bot, message, target_ids, sender_role):
             )
             logger.info(f"Forwarded message {message.message_id} to {user_id}")
 
-            # Log the forwarded message
-            # Optionally, track forwarded messages if needed for deletion
-            # Example:
-            # sent_messages.append({
-            #     "chat_id": user_id,
-            #     "message_id": forwarded_message.message_id
-            # })
-            # save_sent_messages()
-
             # Send an additional message indicating the sender's role with display name
             role_notification = f"🔄 *This message was sent by **{sender_display_name}**.*"
             notification_message = await bot.send_message(
@@ -188,14 +179,6 @@ async def forward_message(bot, message, target_ids, sender_role):
                 parse_mode='Markdown'
             )
             logger.info(f"Sent role notification to {user_id}")
-
-            # Optionally, track notification messages if needed for deletion
-            # Example:
-            # sent_messages.append({
-            #     "chat_id": user_id,
-            #     "message_id": notification_message.message_id
-            # })
-            # save_sent_messages()
 
         except Exception as e:
             logger.error(f"Failed to forward message or send role notification to {user_id}: {e}")
