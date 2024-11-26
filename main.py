@@ -537,6 +537,7 @@ specific_user_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
+    per_user=True,  # Explicitly set per_user to True
 )
 
 # Define the ConversationHandler for specific team commands
@@ -547,6 +548,7 @@ specific_team_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
+    per_user=True,  # Explicitly set per_user to True
 )
 
 # Define the ConversationHandler for general team messages
@@ -557,6 +559,7 @@ team_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
+    per_user=True,  # Explicitly set per_user to True
 )
 
 # Define the ConversationHandler for Tara team messages using -t or -T
@@ -567,6 +570,7 @@ tara_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
+    per_user=True,  # Explicitly set per_user to True
 )
 
 # ------------------ Command Handlers ------------------
