@@ -238,6 +238,8 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     choice = query.data
 
+    logger.info(f"Received confirmation choice: '{choice}' from user {query.from_user.id}")
+
     if choice == 'confirm':
         # Proceed to send the message
         message_to_send = context.user_data.get('message_to_send')
@@ -534,7 +536,7 @@ specific_user_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$'), specific_user_trigger)],
     states={
         SPECIFIC_USER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_user_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm|cancel)$')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     per_user=True,  # Explicitly set per_user to True
@@ -545,7 +547,7 @@ specific_team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
     states={
         SPECIFIC_TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm|cancel)$')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     per_user=True,  # Explicitly set per_user to True
@@ -556,7 +558,7 @@ team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-?team-?$'), team_trigger)],
     states={
         TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm|cancel)$')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     per_user=True,  # Explicitly set per_user to True
@@ -567,7 +569,7 @@ tara_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
     states={
         TARA_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tara_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm|cancel)$')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     per_user=True,  # Explicitly set per_user to True
