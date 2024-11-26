@@ -89,7 +89,7 @@ async def forward_message(bot, message, target_ids, sender_role):
                 parse_mode='Markdown'
             )
             logger.info(f"Sent role notification to {user_id}")
-        
+
         except Exception as e:
             logger.error(f"Failed to forward message or send role notification to {user_id}: {e}")
 
@@ -117,8 +117,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for target_role in target_roles:
         target_ids.update(ROLE_MAP.get(target_role, []))
 
-    # If the sender is not tara_team, exclude their own user ID from the targets
-    if role != 'tara_team':
+    # Exclude the sender's user ID if they are in 'tara_team'
+    if role == 'tara_team':
         target_ids.discard(user_id)
 
     # Log the forwarding action
