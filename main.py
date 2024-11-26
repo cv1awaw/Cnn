@@ -1,6 +1,6 @@
 import logging
 import os
-from telegram import Update
+from telegram import Update, Message, InputMediaPhoto, InputMediaDocument
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -53,43 +53,70 @@ def get_user_role(user_id):
             return role
     return None
 
-async def forward_message(bot, message, target_ids, sender_info=None):
-    """Forward a message to a list of target user IDs with sender information."""
-    for user_id in target_ids:
-        try:
-            if sender_info:
-                # Customize the message with sender information
-                forwarded_text = f"📤 **Forwarded Message**\n**From:** {sender_info}\n\n{message.text}"
-                await bot.send_message(
-                    chat_id=user_id,
-                    text=forwarded_text,
-                    parse_mode='Markdown'
-                )
-            else:
-                # If no sender info is provided, just forward the message
-                await bot.forward_message(
-                    chat_id=user_id,
-                    from_chat_id=message.chat.id,
-                    message_id=message.message_id
-                )
-            logger.info(f"Forwarded message {message.message_id} to {user_id}")
-        except Exception as e:
-            logger.error(f"Failed to forward message to {user_id}: {e}")
+async def forward_text_message(bot, chat_id, sender_info, message_text):
+    """Forward text messages with sender information."""
+    forwarded_text = f"📤 **Forwarded Message**\n**From:** {sender_info}\n\n{message_text}"
+    await bot.send_message(
+        chat_id=chat_id,
+        text=forwarded_text,
+        parse_mode='Markdown'
+    )
 
-async def handle_role_message(bot, chat_id, message_text, role, user_info):
+async def forward_media_message(bot, chat_id, message):
+    """Forward media messages without altering them."""
+    # Depending on the media type, use the appropriate forwarding method
+    if message.photo:
+        # For photos, forward the highest resolution
+        await bot.send_photo(
+            chat_id=chat_id,
+            photo=message.photo[-1].file_id,
+            caption=f"📤 **Forwarded Photo**\n**From:** {message.from_user.first_name} ({get_user_role(message.from_user.id)})"
+        )
+    elif message.document:
+        await bot.send_document(
+            chat_id=chat_id,
+            document=message.document.file_id,
+            caption=f"📤 **Forwarded Document**\n**From:** {message.from_user.first_name} ({get_user_role(message.from_user.id)})"
+        )
+    elif message.video:
+        await bot.send_video(
+            chat_id=chat_id,
+            video=message.video.file_id,
+            caption=f"📤 **Forwarded Video**\n**From:** {message.from_user.first_name} ({get_user_role(message.from_user.id)})"
+        )
+    elif message.audio:
+        await bot.send_audio(
+            chat_id=chat_id,
+            audio=message.audio.file_id,
+            caption=f"📤 **Forwarded Audio**\n**From:** {message.from_user.first_name} ({get_user_role(message.from_user.id)})"
+        )
+    elif message.sticker:
+        await bot.send_sticker(
+            chat_id=chat_id,
+            sticker=message.sticker.file_id
+        )
+    else:
+        # For other types, use forward_message as a fallback
+        await bot.forward_message(
+            chat_id=chat_id,
+            from_chat_id=message.chat.id,
+            message_id=message.message_id
+        )
+
+async def handle_role_message(bot, chat_id, message: Message, role, user_info):
     """Handle messages prefixed with -role and send them to the sender's team and tara_team."""
     # Extract the actual message by removing the prefix
-    actual_message = message_text[len('-role'):].strip()
-    if not actual_message:
+    message_text = message.text[len('-role'):].strip()
+    if not message_text:
         await bot.send_message(chat_id=chat_id, text="Please provide a message after '-role'.")
         return
 
-    # Get the list of user IDs for the sender's role
-    target_ids = SENDING_ROLE_TARGETS.get(role, []).copy()
+    # Get the list of target roles
+    target_roles = SENDING_ROLE_TARGETS.get(role, []).copy()
 
     # Aggregate all target user IDs from the target roles
     aggregated_ids = []
-    for target_role in target_ids:
+    for target_role in target_roles:
         aggregated_ids.extend(ROLE_MAP.get(target_role, []))
 
     # Remove sender's ID if they are not in tara_team
@@ -99,19 +126,25 @@ async def handle_role_message(bot, chat_id, message_text, role, user_info):
     # Remove duplicates by converting to set
     aggregated_ids = list(set(aggregated_ids))
 
-    # Send the message to each target user with sender info
+    # Prepare sender information
     sender_info = f"{user_info['first_name']} ({role})"
-    for user_id in aggregated_ids:
-        try:
-            forwarded_text = f"📤 **Forwarded Message**\n**From:** {sender_info}\n\n{actual_message}"
-            await bot.send_message(
-                chat_id=user_id,
-                text=forwarded_text,
-                parse_mode='Markdown'
-            )
-            logger.info(f"Sent role-specific message to {user_id}")
-        except Exception as e:
-            logger.error(f"Failed to send role-specific message to {user_id}: {e}")
+
+    if message.text:
+        # Handle text messages
+        for user_id in aggregated_ids:
+            try:
+                await forward_text_message(bot, user_id, sender_info, message_text)
+                logger.info(f"Sent role-specific text message to {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to send role-specific text message to {user_id}: {e}")
+    else:
+        # Handle media messages
+        for user_id in aggregated_ids:
+            try:
+                await forward_media_message(bot, user_id, message)
+                logger.info(f"Sent role-specific media message to {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to send role-specific media message to {user_id}: {e}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming messages and forward them based on user roles."""
@@ -140,7 +173,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if message_text.startswith('-role'):
         # Handle role-specific message
         logger.info(f"Handling role-specific message from '{role}'")
-        await handle_role_message(context.bot, message.chat.id, message_text, role, user_info)
+        await handle_role_message(context.bot, message.chat.id, message, role, user_info)
     else:
         # Determine target roles based on sender's role
         target_roles = SENDING_ROLE_TARGETS.get(role, [])
@@ -163,18 +196,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Prepare sender information
         sender_info = f"{user_info['first_name']} ({role})"
 
-        # Send the message to each target user with sender info
-        for target_id in target_ids:
-            try:
-                forwarded_text = f"📤 **Forwarded Message**\n**From:** {sender_info}\n\n{message_text}"
-                await context.bot.send_message(
-                    chat_id=target_id,
-                    text=forwarded_text,
-                    parse_mode='Markdown'
-                )
-                logger.info(f"Sent message to {target_id}")
-            except Exception as e:
-                logger.error(f"Failed to send message to {target_id}: {e}")
+        if message.text:
+            # Handle text messages
+            for target_id in target_ids:
+                try:
+                    forwarded_text = f"📤 **Forwarded Message**\n**From:** {sender_info}\n\n{message_text}"
+                    await context.bot.send_message(
+                        chat_id=target_id,
+                        text=forwarded_text,
+                        parse_mode='Markdown'
+                    )
+                    logger.info(f"Sent text message to {target_id}")
+                except Exception as e:
+                    logger.error(f"Failed to send text message to {target_id}: {e}")
+        else:
+            # Handle media messages
+            for target_id in target_ids:
+                try:
+                    await forward_media_message(context.bot, target_id, message)
+                    logger.info(f"Sent media message to {target_id}")
+                except Exception as e:
+                    logger.error(f"Failed to send media message to {target_id}: {e}")
 
 def main():
     """Main function to start the Telegram bot."""
@@ -186,8 +228,11 @@ def main():
     # Build the application
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Handle all text and document messages
-    message_handler = MessageHandler(filters.TEXT | filters.Document.ALL, handle_message)
+    # Handle all text, photo, document, video, audio, and sticker messages
+    message_handler = MessageHandler(
+        filters.TEXT | filters.PHOTO | filters.DOCUMENT | filters.VIDEO | filters.AUDIO | filters.STICKER,
+        handle_message
+    )
     application.add_handler(message_handler)
 
     # Start the Bot
