@@ -72,15 +72,16 @@ TRIGGER_TARGET_MAP = {
 }
 
 # Define target roles for each role
+# Adjusted to ensure that other roles can only send messages to 'tara_team'
 SENDING_ROLE_TARGETS = {
-    'writer': ['mcqs_team', 'checker_team', 'tara_team', 'mind_map_form_creator'],
-    'mcqs_team': ['design_team', 'tara_team', 'mind_map_form_creator'],
-    'checker_team': ['tara_team', 'word_team'],
-    'word_team': ['tara_team', 'design_team'],
-    'design_team': ['tara_team', 'king_team'],
+    'writer': ['tara_team'],
+    'mcqs_team': ['tara_team'],
+    'checker_team': ['tara_team'],
+    'word_team': ['tara_team'],
+    'design_team': ['tara_team'],
     'king_team': ['tara_team'],
     'tara_team': list(ROLE_MAP.keys()),  # Tara can send to all roles
-    'mind_map_form_creator': ['design_team', 'tara_team'],
+    'mind_map_form_creator': ['tara_team'],
 }
 
 # ------------------ Define Conversation States ------------------
@@ -462,13 +463,90 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ------------------ Conversation Handlers ------------------
 
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger function when a Tara team member sends a specific command."""
+    """Trigger function when a Tara team member sends a specific user command."""
     user_id = update.message.from_user.id
     role = get_user_role(user_id)
 
     if role != 'tara_team':
         await update.message.reply_text("You are not authorized to use this command.")
-        logger.warning(f"Unauthorized access attempt by user {user_id} for specific triggers.")
+        logger.warning(f"Unauthorized access attempt by user {user_id} for specific user triggers.")
+        return ConversationHandler.END
+
+    # Extract username from the command using regex
+    match = re.match(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$', update.message.text)
+    if not match:
+        await update.message.reply_text("Invalid format. Please use `-@username` to target a user.", parse_mode='Markdown')
+        logger.warning(f"Invalid user command format from user {user_id}.")
+        return ConversationHandler.END
+
+    target_username = match.group(1).lower()
+    target_user_id = user_data_store.get(target_username)
+
+    if not target_user_id:
+        await update.message.reply_text(f"User `@{target_username}` not found.", parse_mode='Markdown')
+        logger.warning(f"Tara Team member {user_id} attempted to target non-existent user @{target_username}.")
+        return ConversationHandler.END
+
+    # Store target user ID in user_data
+    context.user_data['target_user_id'] = target_user_id
+
+    await update.message.reply_text(f"Write your message for user `@{target_username}`.", parse_mode='Markdown')
+    return SPECIFIC_USER_MESSAGE
+
+async def specific_user_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the message intended for a specific user."""
+    message = update.message
+    user_id = message.from_user.id
+    role = get_user_role(user_id)
+
+    if not role:
+        await message.reply_text("You don't have a role assigned to use this bot.")
+        logger.warning(f"Unauthorized access attempt by user {user_id}")
+        return ConversationHandler.END
+
+    target_user_id = context.user_data.get('target_user_id')
+    if not target_user_id:
+        await message.reply_text("An error occurred. Please try again.")
+        logger.error(f"No target user ID found in user_data for user {user_id}.")
+        return ConversationHandler.END
+
+    # Forward the message to the specific user
+    try:
+        await message.forward(chat_id=target_user_id)
+        logger.info(f"Forwarded message {message.message_id} from user {user_id} to user {target_user_id}.")
+
+        # Retrieve the target username for confirmation
+        target_username = None
+        for uname, uid in user_data_store.items():
+            if uid == target_user_id:
+                target_username = uname
+                break
+
+        if target_username:
+            confirmation = (
+                f"✅ *Your message has been sent to `@{target_username}`.*"
+            )
+        else:
+            confirmation = (
+                f"✅ *Your message has been sent to the specified user.*"
+            )
+        await message.reply_text(confirmation, parse_mode='Markdown')
+        logger.info(f"Confirmation sent to user {user_id} for message to user {target_user_id}.")
+
+    except Exception as e:
+        logger.error(f"Failed to forward message to user {target_user_id}: {e}")
+        await message.reply_text("Failed to send your message. Please try again later.")
+
+    return ConversationHandler.END
+
+async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger function when a Tara team member sends a specific team command."""
+    user_id = update.message.from_user.id
+    role = get_user_role(user_id)
+
+    if role != 'tara_team':
+        await update.message.reply_text("You are not authorized to use this command.")
+        logger.warning(f"Unauthorized access attempt by user {user_id} for specific team triggers.")
         return ConversationHandler.END
 
     message = update.message.text.lower().strip()
@@ -525,51 +603,45 @@ async def specific_team_message_handler(update: Update, context: ContextTypes.DE
 
     return ConversationHandler.END
 
-async def specific_user_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the message intended for a specific user."""
-    message = update.message
-    user_id = message.from_user.id
-    role = get_user_role(user_id)
+# ------------------ Conversation Handlers ------------------
 
-    if not role:
-        await message.reply_text("You don't have a role assigned to use this bot.")
-        logger.warning(f"Unauthorized access attempt by user {user_id}")
-        return ConversationHandler.END
+# Define the ConversationHandler for specific user commands
+specific_user_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$'), specific_user_trigger)],
+    states={
+        SPECIFIC_USER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_user_message_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
 
-    target_user_id = context.user_data.get('target_user_id')
-    if not target_user_id:
-        await message.reply_text("An error occurred. Please try again.")
-        logger.error(f"No target user ID found in user_data for user {user_id}.")
-        return ConversationHandler.END
+# Define the ConversationHandler for specific team commands
+specific_team_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
+    states={
+        SPECIFIC_TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_team_message_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
 
-    # Forward the message to the specific user
-    try:
-        await message.forward(chat_id=target_user_id)
-        logger.info(f"Forwarded message {message.message_id} from user {user_id} to user {target_user_id}.")
+# Define the ConversationHandler for general team messages
+team_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-?team-?$'), team_trigger)],
+    states={
+        TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, team_message_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
 
-        # Retrieve the target username for confirmation
-        target_username = None
-        for uname, uid in user_data_store.items():
-            if uid == target_user_id:
-                target_username = uname
-                break
+# Define the ConversationHandler for Tara team messages using -t or -T
+tara_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
+    states={
+        TARA_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tara_message_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
 
-        if target_username:
-            confirmation = (
-                f"✅ *Your message has been sent to `@{target_username}`.*"
-            )
-        else:
-            confirmation = (
-                f"✅ *Your message has been sent to the specified user.*"
-            )
-        await message.reply_text(confirmation, parse_mode='Markdown')
-        logger.info(f"Confirmation sent to user {user_id} for message to user {target_user_id}.")
-
-    except Exception as e:
-        logger.error(f"Failed to forward message to user {target_user_id}: {e}")
-        await message.reply_text("Failed to send your message. Please try again later.")
-
-    return ConversationHandler.END
+# ------------------ Additional Functions ------------------
 
 async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the general team trigger."""
@@ -640,8 +712,9 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     role = get_user_role(user_id)
 
-    # Optionally, you can restrict which roles can send messages to Tara
-    # For now, assuming all roles can send messages to Tara
+    # Tara Team can send messages to themselves and others as defined in SENDING_ROLE_TARGETS
+    # Based on your requirements, messages sent by Tara Team should not be forwarded to any other roles
+    # Therefore, we'll handle it separately to ensure no forwarding occurs
 
     await update.message.reply_text("Write your message for the Tara Team.")
     return TARA_MESSAGE
@@ -687,44 +760,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the conversation."""
     await update.message.reply_text("Operation cancelled.")
     return ConversationHandler.END
-
-# ------------------ Conversation Handlers ------------------
-
-# Define the ConversationHandler for specific user commands
-specific_user_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$'), specific_user_trigger)],
-    states={
-        SPECIFIC_USER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_user_message_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# Define the ConversationHandler for specific team commands
-specific_team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
-    states={
-        SPECIFIC_TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_team_message_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# Define the ConversationHandler for general team messages
-team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-?team-?$'), team_trigger)],
-    states={
-        TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, team_message_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# Define the ConversationHandler for Tara team messages using -t or -T
-tara_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
-    states={
-        TARA_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tara_message_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
 
 # ------------------ Main Function ------------------
 
