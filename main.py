@@ -181,6 +181,51 @@ async def forward_message(bot, message, target_ids, sender_role):
         except Exception as e:
             logger.error(f"Failed to forward message or send role notification to {user_id}: {e}")
 
+# ------------------ Additional Functions ------------------
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel the conversation."""
+    await update.message.reply_text("Operation cancelled.")
+    return ConversationHandler.END
+
+# ------------------ Conversation Handlers ------------------
+
+# Define the ConversationHandler for specific user commands
+specific_user_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$'), specific_user_trigger)],
+    states={
+        SPECIFIC_USER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_user_message_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
+
+# Define the ConversationHandler for specific team commands
+specific_team_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
+    states={
+        SPECIFIC_TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_team_message_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
+
+# Define the ConversationHandler for general team messages
+team_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-?team-?$'), team_trigger)],
+    states={
+        TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, team_message_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
+
+# Define the ConversationHandler for Tara team messages using -t or -T
+tara_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
+    states={
+        TARA_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tara_message_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
+
 # ------------------ Command Handlers ------------------
 
 async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -460,7 +505,7 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
     logger.info(f"User {user_id} requested the list of muted users.")
 
-# ------------------ Conversation Handlers ------------------
+# ------------------ Additional Conversation Handlers ------------------
 
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger function when a Tara team member sends a specific user command."""
@@ -603,46 +648,6 @@ async def specific_team_message_handler(update: Update, context: ContextTypes.DE
 
     return ConversationHandler.END
 
-# ------------------ Conversation Handlers ------------------
-
-# Define the ConversationHandler for specific user commands
-specific_user_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$'), specific_user_trigger)],
-    states={
-        SPECIFIC_USER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_user_message_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# Define the ConversationHandler for specific team commands
-specific_team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
-    states={
-        SPECIFIC_TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_team_message_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# Define the ConversationHandler for general team messages
-team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-?team-?$'), team_trigger)],
-    states={
-        TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, team_message_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# Define the ConversationHandler for Tara team messages using -t or -T
-tara_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
-    states={
-        TARA_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tara_message_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# ------------------ Additional Functions ------------------
-
 async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the general team trigger."""
     user_id = update.message.from_user.id
@@ -754,11 +759,6 @@ async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     )
     await message.reply_text(confirmation, parse_mode='Markdown')
 
-    return ConversationHandler.END
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancel the conversation."""
-    await update.message.reply_text("Operation cancelled.")
     return ConversationHandler.END
 
 # ------------------ Main Function ------------------
