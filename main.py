@@ -483,26 +483,14 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
         return ConversationHandler.END
 
-    # Store the message and targets for confirmation
-    context.user_data['message_to_send'] = message
-    context.user_data['target_ids'] = list(target_ids)
-    context.user_data['target_roles'] = target_roles
+    # Handle PDF documents
+    if message.document and message.document.mime_type == 'application/pdf':
+        await send_confirmation(message, context, selected_role, target_ids)
+    else:
+        await message.reply_text("Please send PDF documents only.")
+        logger.warning(f"User {user_id} sent a non-PDF document.")
 
-    confirmation_text = (
-        f"📩 *You are about to send the following message to **{', '.join([ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles])}**:*\n\n"
-        f"{message.text}\n\n"
-        "Do you want to send this message?"
-    )
-    await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=get_confirmation_keyboard(message.message_id))
-
-    # Store confirmation data
-    context.user_data[f'confirm_{message.message_id}'] = {
-        'message': message,
-        'target_ids': list(target_ids),
-        'sender_role': selected_role
-    }
-
-    return CONFIRMATION
+    return
 
 async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the role selection from the user."""
@@ -984,76 +972,66 @@ def main():
     # Build the application
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    async def run_bot():
-        """Asynchronous function to set up and run the bot."""
-        try:
-            # Remove any existing webhook to prevent conflicts
-            await application.bot.delete_webhook()
-            logger.info("Deleted any existing webhooks.")
+    # Add handlers...
 
-            # Add the /start command handler
-            start_handler = CommandHandler('start', start)
-            application.add_handler(start_handler)
+    # Add the /start command handler
+    start_handler = CommandHandler('start', start)
+    application.add_handler(start_handler)
 
-            # Add the /listusers command handler
-            list_users_handler = CommandHandler('listusers', list_users)
-            application.add_handler(list_users_handler)
+    # Add the /listusers command handler
+    list_users_handler = CommandHandler('listusers', list_users)
+    application.add_handler(list_users_handler)
 
-            # Add the /help command handler
-            help_handler = CommandHandler('help', help_command)
-            application.add_handler(help_handler)
+    # Add the /help command handler
+    help_handler = CommandHandler('help', help_command)
+    application.add_handler(help_handler)
 
-            # Add the /refresh command handler
-            refresh_handler = CommandHandler('refresh', refresh)
-            application.add_handler(refresh_handler)
+    # Add the /refresh command handler
+    refresh_handler = CommandHandler('refresh', refresh)
+    application.add_handler(refresh_handler)
 
-            # Add the /mute command handler (only for Tara Team)
-            mute_handler = CommandHandler('mute', mute_command)
-            application.add_handler(mute_handler)
+    # Add the /mute command handler (only for Tara Team)
+    mute_handler = CommandHandler('mute', mute_command)
+    application.add_handler(mute_handler)
 
-            # Add the /muteid command handler (only for Tara Team)
-            mute_id_handler = CommandHandler('muteid', mute_id_command)
-            application.add_handler(mute_id_handler)
+    # Add the /muteid command handler (only for Tara Team)
+    mute_id_handler = CommandHandler('muteid', mute_id_command)
+    application.add_handler(mute_id_handler)
 
-            # Add the /unmuteid command handler (only for Tara Team)
-            unmute_id_handler = CommandHandler('unmuteid', unmute_id_command)
-            application.add_handler(unmute_id_handler)
+    # Add the /unmuteid command handler (only for Tara Team)
+    unmute_id_handler = CommandHandler('unmuteid', unmute_id_command)
+    application.add_handler(unmute_id_handler)
 
-            # Add the /listmuted command handler (only for Tara Team)
-            list_muted_handler = CommandHandler('listmuted', list_muted_command)
-            application.add_handler(list_muted_handler)
+    # Add the /listmuted command handler (only for Tara Team)
+    list_muted_handler = CommandHandler('listmuted', list_muted_command)
+    application.add_handler(list_muted_handler)
 
-            # Add the ConversationHandler for specific user commands
-            application.add_handler(specific_user_conv_handler)
+    # Add the ConversationHandler for specific user commands
+    application.add_handler(specific_user_conv_handler)
 
-            # Add the ConversationHandler for specific team commands
-            application.add_handler(specific_team_conv_handler)
+    # Add the ConversationHandler for specific team commands
+    application.add_handler(specific_team_conv_handler)
 
-            # Add the ConversationHandler for general team messages (-team)
-            application.add_handler(team_conv_handler)
+    # Add the ConversationHandler for general team messages (-team)
+    application.add_handler(team_conv_handler)
 
-            # Add the ConversationHandler for Tara team messages (-t)
-            application.add_handler(tara_conv_handler)
+    # Add the ConversationHandler for Tara team messages (-t)
+    application.add_handler(tara_conv_handler)
 
-            # Add the Confirmation CallbackQueryHandler
-            confirmation_handler_conv = CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')
-            application.add_handler(confirmation_handler_conv)
+    # Add the Confirmation CallbackQueryHandler
+    confirmation_handler_conv = CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')
+    application.add_handler(confirmation_handler_conv)
 
-            # Handle all other text and document messages, excluding commands
-            message_handler = MessageHandler(
-                (filters.TEXT & ~filters.COMMAND) | filters.Document.ALL, 
-                handle_general_message
-            )
-            application.add_handler(message_handler)
+    # Handle all other text and document messages, excluding commands
+    message_handler = MessageHandler(
+        (filters.TEXT & ~filters.COMMAND) | filters.Document.ALL, 
+        handle_general_message
+    )
+    application.add_handler(message_handler)
 
-            # Start the Bot using long polling
-            logger.info("Bot started polling...")
-            await application.run_polling()
-        except Exception as e:
-            logger.error(f"An error occurred while running the bot: {e}")
-
-    import asyncio
-    asyncio.run(run_bot())
+    # Start the Bot using long polling
+    logger.info("Bot started polling...")
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
