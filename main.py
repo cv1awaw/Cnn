@@ -443,10 +443,7 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     role = get_user_role(user_id)
 
-    # Tara Team can send messages to themselves and others as defined in SENDING_ROLE_TARGETS
-    # Based on your requirements, messages sent by Tara Team should not be forwarded to any other roles
-    # Therefore, we'll handle it separately to ensure no forwarding occurs
-
+    # No role restriction; all users can use -t to send messages to Tara Team
     await update.message.reply_text("Write your message for the Tara Team.")
     context.user_data['sender_role'] = role
     return TARA_MESSAGE
@@ -509,7 +506,7 @@ specific_team_conv_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cancel)],
 )
 
-# Define the ConversationHandler for general team messages
+# Define the ConversationHandler for general team messages (-team)
 team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-team$'), team_trigger)],
     states={
@@ -519,7 +516,7 @@ team_conv_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cancel)],
 )
 
-# Define the ConversationHandler for Tara team messages using -t or -T
+# Define the ConversationHandler for Tara team messages (-t)
 tara_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
     states={
@@ -659,8 +656,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`-d` - Send a message to the Digital Writers and Tara Team.\n"
         "`-de` - Send a message to the Design Team and Tara Team.\n"
         "`-mf` - Send a message to the Mind Map & Form Creation Team and Tara Team.\n"
-        "`-t` - Send a message to the Tara Team.\n"
-        "`-@username` - (Tara Team only) Send a message to a specific user.\n\n"
+        "`-t` - Send a message exclusively to the Tara Team.\n"
+        "`-@username` - *(Tara Team only)* Send a message to a specific user.\n\n"
         "📌 *Notes:*\n"
         "- Only authorized roles can use specific commands.\n"
         "- Use `/cancel` to cancel any ongoing operation."
@@ -871,7 +868,7 @@ def main():
     # Add the ConversationHandler for specific team commands
     application.add_handler(specific_team_conv_handler)
 
-    # Add the ConversationHandler for general team messages
+    # Add the ConversationHandler for general team messages (-team)
     application.add_handler(team_conv_handler)
 
     # Add the ConversationHandler for Tara team messages (-t)
