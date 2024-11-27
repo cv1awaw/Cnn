@@ -310,30 +310,25 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
 
     return CONFIRMATION
 
-async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger function when a Tara team member sends a specific team command."""
+async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the general team trigger."""
     user_id = update.message.from_user.id
     role = get_user_role(user_id)
 
-    if role != 'tara_team':
-        await update.message.reply_text("You are not authorized to use this command.")
-        logger.warning(f"Unauthorized access attempt by user {user_id} for specific team triggers.")
+    if not role:
+        await update.message.reply_text("You don't have a role assigned to use this bot.")
+        logger.warning(f"Unauthorized access attempt by user {user_id} for general team trigger.")
         return ConversationHandler.END
 
-    message = update.message.text.lower().strip()
-    target_roles = TRIGGER_TARGET_MAP.get(message)
+    # Include both the same role and the Tara Team as targets
+    target_roles = [role, 'tara_team']
 
-    if not target_roles:
-        await update.message.reply_text("Invalid trigger. Please try again.")
-        logger.warning(f"Invalid trigger '{message}' from user {user_id}.")
-        return ConversationHandler.END
-
-    # Store target roles in user_data
+    # Store target roles in user_data for use in the next step
     context.user_data['specific_target_roles'] = target_roles
     context.user_data['sender_role'] = role
 
-    await update.message.reply_text("Write your message for your team.")
-    return SPECIFIC_TEAM_MESSAGE
+    await update.message.reply_text("Write your message for your team and Tara Team.")
+    return TEAM_MESSAGE
 
 async def specific_team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the team message after the specific trigger and ask for confirmation."""
