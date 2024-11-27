@@ -330,8 +330,8 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Write your message for your team and Tara Team.")
     return TEAM_MESSAGE
 
-async def specific_team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the team message after the specific trigger and ask for confirmation."""
+async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the team message after the general trigger and ask for confirmation."""
     message = update.message
     user_id = message.from_user.id
     role = get_user_role(user_id)
