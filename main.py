@@ -159,7 +159,7 @@ def save_muted_users():
 # ------------------ Message Forwarding ------------------
 
 async def forward_message(bot, message, target_ids, sender_role):
-    """Forward a document to a list of target user IDs and notify about the sender's role."""
+    """Forward a document or text message to a list of target user IDs and notify about the sender's role."""
     # Get the display name for the sender's role
     sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
 
@@ -169,8 +169,15 @@ async def forward_message(bot, message, target_ids, sender_role):
     else:
         username_display = message.from_user.first_name
 
-    # Construct the caption with @username and role name
-    caption = f"🔄 *This document was sent by **{username_display} ({sender_display_name})**.*"
+    if message.document:
+        # Construct the caption with @username and role name
+        caption = f"🔄 *This document was sent by **{username_display} ({sender_display_name})**.*"
+    elif message.text:
+        # Construct the message with @username and role name
+        caption = f"🔄 *This message was sent by **{username_display} ({sender_display_name})**.*"
+    else:
+        # Handle other message types if necessary
+        caption = f"🔄 *This message was sent by **{username_display} ({sender_display_name})**.*"
 
     for user_id in target_ids:
         try:
@@ -183,8 +190,16 @@ async def forward_message(bot, message, target_ids, sender_role):
                     parse_mode='Markdown'
                 )
                 logger.info(f"Forwarded document {message.document.file_id} to {user_id}")
+            elif message.text:
+                # Forward the text message with the updated caption
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=f"{caption}\n\n{message.text}",
+                    parse_mode='Markdown'
+                )
+                logger.info(f"Forwarded text message to {user_id}")
             else:
-                # Forward text messages or other types if needed
+                # Forward other types of messages if needed
                 await bot.forward_message(
                     chat_id=user_id,
                     from_chat_id=message.chat.id,
@@ -231,12 +246,24 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         target_roles = SENDING_ROLE_TARGETS.get(sender_role, [])
         recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
 
-        confirmation_text = (
-            f"✅ *Your PDF `**{message_to_send.document.file_name}**` has been sent from **{sender_display_name}** "
-            f"to **{', '.join(recipient_display_names)}**.*"
-        )
+        if message_to_send.document:
+            confirmation_text = (
+                f"✅ *Your PDF `**{message_to_send.document.file_name}**` has been sent from **{sender_display_name}** "
+                f"to **{', '.join(recipient_display_names)}**.*"
+            )
+        elif message_to_send.text:
+            confirmation_text = (
+                f"✅ *Your message has been sent from **{sender_display_name}** "
+                f"to **{', '.join(recipient_display_names)}**.*"
+            )
+        else:
+            confirmation_text = (
+                f"✅ *Your message has been sent from **{sender_display_name}** "
+                f"to **{', '.join(recipient_display_names)}**.*"
+            )
+
         await query.edit_message_text(confirmation_text, parse_mode='Markdown')
-        logger.info(f"User {query.from_user.id} confirmed and sent the PDF {message_to_send.document.file_id}.")
+        logger.info(f"User {query.from_user.id} confirmed and sent the message {message_to_send.message_id}.")
 
         # Clean up the stored data
         del context.user_data[f'confirm_{message_id}']
@@ -334,10 +361,17 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
     context.user_data['target_ids'] = [target_user_id]
     context.user_data['target_roles'] = ['specific_user']
 
+    if message.document:
+        content_description = f"PDF: `{message.document.file_name}`"
+    elif message.text:
+        content_description = f"Message: `{message.text}`"
+    else:
+        content_description = "Unsupported message type."
+
     confirmation_text = (
-        f"📩 *You are about to send the following message to `@{target_username}`:*\n\n"
-        f"{message.text}\n\n"
-        "Do you want to send this message?"
+        f"📩 *You are about to send the following to `@{target_username}`:*\n\n"
+        f"{content_description}\n\n"
+        "Do you want to send this?"
     )
     await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=get_confirmation_keyboard(message.message_id))
 
@@ -405,10 +439,17 @@ async def specific_team_message_handler(update: Update, context: ContextTypes.DE
     context.user_data['target_ids'] = list(target_ids)
     context.user_data['target_roles'] = target_roles
 
+    if message.document:
+        content_description = f"PDF: `{message.document.file_name}`"
+    elif message.text:
+        content_description = f"Message: `{message.text}`"
+    else:
+        content_description = "Unsupported message type."
+
     confirmation_text = (
-        f"📩 *You are about to send the following message to **{', '.join([ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles])}**:*\n\n"
-        f"{message.text}\n\n"
-        "Do you want to send this message?"
+        f"📩 *You are about to send the following to **{', '.join([ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles])}**:*\n\n"
+        f"{content_description}\n\n"
+        "Do you want to send this?"
     )
     await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=get_confirmation_keyboard(message.message_id))
 
@@ -483,13 +524,15 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
         return ConversationHandler.END
 
-    # Handle PDF documents
+    # Handle PDF documents and text messages
     if message.document and message.document.mime_type == 'application/pdf':
         await send_confirmation(message, context, selected_role, target_ids)
+    elif message.text:
+        await send_confirmation(message, context, selected_role, target_ids)
     else:
-        await message.reply_text("Please send PDF documents only.")
-        logger.warning(f"User {user_id} sent a non-PDF document.")
-
+        await message.reply_text("Please send PDF documents or text messages only.")
+        logger.warning(f"User {user_id} sent an unsupported message type.")
+    
     return
 
 async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -565,10 +608,17 @@ async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data['target_ids'] = list(target_ids)
     context.user_data['target_roles'] = target_roles
 
+    if message.document:
+        content_description = f"PDF: `{message.document.file_name}`"
+    elif message.text:
+        content_description = f"Message: `{message.text}`"
+    else:
+        content_description = "Unsupported message type."
+
     confirmation_text = (
-        f"📩 *You are about to send the following message to **Tara Team**:*\n\n"
-        f"{message.text}\n\n"
-        "Do you want to send this message?"
+        f"📩 *You are about to send the following to **Tara Team**:*\n\n"
+        f"{content_description}\n\n"
+        "Do you want to send this?"
     )
     await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=get_confirmation_keyboard(message.message_id))
 
@@ -587,7 +637,7 @@ async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 specific_user_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$'), specific_user_trigger)],
     states={
-        SPECIFIC_USER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_user_message_handler)],
+        SPECIFIC_USER_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)],
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -597,7 +647,7 @@ specific_user_conv_handler = ConversationHandler(
 specific_team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
     states={
-        SPECIFIC_TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, specific_team_message_handler)],
+        SPECIFIC_TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)],
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -608,7 +658,7 @@ team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-team$'), team_trigger)],
     states={
         SELECT_ROLE: [CallbackQueryHandler(select_role_handler)],
-        TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, team_message_handler)],
+        TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)],
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -618,7 +668,7 @@ team_conv_handler = ConversationHandler(
 tara_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
     states={
-        TARA_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tara_message_handler)],
+        TARA_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)],
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -696,12 +746,14 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
             await message.reply_text("No recipients found to send your message.")
             return
 
-        # Handle PDF documents
+        # Handle PDF documents and text messages
         if message.document and message.document.mime_type == 'application/pdf':
             await send_confirmation(message, context, selected_role, target_ids)
+        elif message.text:
+            await send_confirmation(message, context, selected_role, target_ids)
         else:
-            await message.reply_text("Please send PDF documents only.")
-            logger.warning(f"User {user_id} sent a non-PDF document.")
+            await message.reply_text("Please send PDF documents or text messages only.")
+            logger.warning(f"User {user_id} sent an unsupported message type.")
 
     return
 
@@ -932,11 +984,18 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ------------------ Helper Functions ------------------
 
 async def send_confirmation(message, context, sender_role, target_ids):
-    """Send a confirmation message with inline buttons for a specific document."""
+    """Send a confirmation message with inline buttons for a specific document or text."""
+    if message.document:
+        content_description = f"PDF: `{message.document.file_name}`"
+    elif message.text:
+        content_description = f"Message: `{message.text}`"
+    else:
+        content_description = "Unsupported message type."
+
     confirmation_text = (
-        f"📩 *You are about to send the following PDF to **{', '.join([ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in SENDING_ROLE_TARGETS.get(sender_role, [])])}**:*\n\n"
-        f"File Name: `{message.document.file_name}`\n\n"
-        "Do you want to send this PDF?"
+        f"📩 *You are about to send the following to **{', '.join([ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in SENDING_ROLE_TARGETS.get(sender_role, [])])}**:*\n\n"
+        f"{content_description}\n\n"
+        "Do you want to send this?"
     )
 
     # Use the message ID to uniquely identify the confirmation
@@ -1024,7 +1083,7 @@ def main():
 
     # Handle all other text and document messages, excluding commands
     message_handler = MessageHandler(
-        (filters.TEXT & ~filters.COMMAND) | filters.Document.ALL, 
+        (filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, 
         handle_general_message
     )
     application.add_handler(message_handler)
