@@ -73,16 +73,16 @@ TRIGGER_TARGET_MAP = {
 }
 
 # Define target roles for each role
-# Adjusted to ensure that other roles can only send messages to 'tara_team'
+# Adjusted to ensure that other roles can only send messages to 'tara_team' and their own role
 SENDING_ROLE_TARGETS = {
-    'writer': ['tara_team'],
-    'mcqs_team': ['tara_team'],
-    'checker_team': ['tara_team'],
-    'word_team': ['tara_team'],
-    'design_team': ['tara_team'],
-    'king_team': ['tara_team'],
+    'writer': ['writer', 'tara_team'],
+    'mcqs_team': ['mcqs_team', 'tara_team'],
+    'checker_team': ['checker_team', 'tara_team'],
+    'word_team': ['word_team', 'tara_team'],
+    'design_team': ['design_team', 'tara_team'],
+    'king_team': ['king_team', 'tara_team'],
     'tara_team': list(ROLE_MAP.keys()),  # Tara can send to all roles
-    'mind_map_form_creator': ['tara_team'],
+    'mind_map_form_creator': ['mind_map_form_creator', 'tara_team'],
 }
 
 # ------------------ Define Conversation States ------------------
@@ -511,7 +511,7 @@ specific_team_conv_handler = ConversationHandler(
 
 # Define the ConversationHandler for general team messages
 team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-?team-?$'), team_trigger)],
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-team$'), team_trigger)],
     states={
         TEAM_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, team_message_handler)],
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
@@ -639,7 +639,7 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User {user_id} requested the list of users.")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Provide help information to users."""
+    """Provide help information to users with subcommands explanations."""
     help_text = (
         "📘 *Available Commands:*\n\n"
         "/start - Initialize interaction with the bot.\n"
@@ -647,10 +647,23 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help - Show this help message.\n"
         "/refresh - Refresh your user information.\n\n"
         "*Specific Commands for Tara Team:*\n"
-        "/mute - Mute yourself or another user.\n"
+        "/mute [user_id] - Mute yourself or another user.\n"
         "/muteid <user_id> - Mute a specific user by their ID.\n"
         "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
-        "/listmuted - List all currently muted users."
+        "/listmuted - List all currently muted users.\n\n"
+        "*Message Sending Triggers:*\n"
+        "`-team` - Send a message to your own team and Tara Team.\n"
+        "`-w` - Send a message to the Writer Team and Tara Team.\n"
+        "`-e` - Send a message to the Editor Team and Tara Team.\n"
+        "`-mcq` - Send a message to the MCQs Team and Tara Team.\n"
+        "`-d` - Send a message to the Digital Writers and Tara Team.\n"
+        "`-de` - Send a message to the Design Team and Tara Team.\n"
+        "`-mf` - Send a message to the Mind Map & Form Creation Team and Tara Team.\n"
+        "`-t` - Send a message to the Tara Team.\n"
+        "`-@username` - (Tara Team only) Send a message to a specific user.\n\n"
+        "📌 *Notes:*\n"
+        "- Only authorized roles can use specific commands.\n"
+        "- Use `/cancel` to cancel any ongoing operation."
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
     logger.info(f"User {update.effective_user.id} requested help.")
