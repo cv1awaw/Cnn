@@ -156,18 +156,42 @@ def save_muted_users():
     except Exception as e:
         logger.error(f"Failed to save muted users: {e}")
 
-# ------------------ Message Forwarding ------------------
+# ------------------ Helper Functions ------------------
+
+def get_display_name(user):
+    """Return the display name for a user."""
+    if user.username:
+        return f"@{user.username}"
+    else:
+        full_name = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
+        return full_name
+
+def get_confirmation_keyboard(message_id):
+    """Return an inline keyboard for confirmation with unique callback data."""
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Confirm", callback_data=f'confirm:{message_id}'),
+            InlineKeyboardButton("❌ Cancel", callback_data=f'cancel:{message_id}'),
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_role_selection_keyboard(roles):
+    """Return an inline keyboard for role selection."""
+    keyboard = []
+    for role in roles:
+        display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
+        callback_data = f"role:{role}"
+        keyboard.append([InlineKeyboardButton(display_name, callback_data=callback_data)])
+    return InlineKeyboardMarkup(keyboard)
 
 async def forward_message(bot, message, target_ids, sender_role):
     """Forward a document or text message to a list of target user IDs and notify about the sender's role."""
     # Get the display name for the sender's role
     sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
 
-    # Get the sender's username, if exists
-    if message.from_user.username:
-        username_display = f"@{message.from_user.username}"
-    else:
-        username_display = message.from_user.first_name
+    # Get the sender's display name using the helper function
+    username_display = get_display_name(message.from_user)
 
     if message.document:
         # Construct the caption with @username and role name
@@ -210,14 +234,48 @@ async def forward_message(bot, message, target_ids, sender_role):
         except Exception as e:
             logger.error(f"Failed to forward message or send role notification to {user_id}: {e}")
 
+async def send_confirmation(message, context, sender_role, target_ids):
+    """Send a confirmation message with inline buttons for a specific document or text."""
+    if message.document:
+        content_description = f"PDF: `{message.document.file_name}`"
+    elif message.text:
+        content_description = f"Message: `{message.text}`"
+    else:
+        content_description = "Unsupported message type."
+
+    confirmation_text = (
+        f"📩 *You are about to send the following to **{', '.join([ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in SENDING_ROLE_TARGETS.get(sender_role, [])])}**:*\n\n"
+        f"{content_description}\n\n"
+        "Do you want to send this?"
+    )
+
+    # Use the message ID to uniquely identify the confirmation
+    callback_data_confirm = f"confirm:{message.message_id}"
+    callback_data_cancel = f"cancel:{message.message_id}"
+
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Confirm", callback_data=callback_data_confirm),
+            InlineKeyboardButton("❌ Cancel", callback_data=callback_data_cancel),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
+
+    # Store necessary data in context.user_data with a unique key
+    context.user_data[f'confirm_{message.message_id}'] = {
+        'message': message,
+        'target_ids': target_ids,
+        'sender_role': sender_role
+    }
+
 # ------------------ Handler Functions ------------------
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the conversation."""
     await update.message.reply_text("Operation cancelled.")
     return ConversationHandler.END
-
-# Confirmation Handler Functions
 
 async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the user's confirmation response."""
@@ -244,7 +302,10 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         # Prepare display names for confirmation
         sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
         target_roles = SENDING_ROLE_TARGETS.get(sender_role, [])
-        recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
+        recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles if r != 'specific_user']
+
+        if 'specific_user' in context.user_data.get('target_roles', []):
+            recipient_display_names = [get_display_name(await context.bot.get_chat(tid)) for tid in target_ids]
 
         if message_to_send.document:
             confirmation_text = (
@@ -282,27 +343,6 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.warning(f"User {query.from_user.id} sent invalid confirmation choice: {data}")
 
     return ConversationHandler.END
-
-def get_confirmation_keyboard(message_id):
-    """Return an inline keyboard for confirmation with unique callback data."""
-    keyboard = [
-        [
-            InlineKeyboardButton("✅ Confirm", callback_data=f'confirm:{message_id}'),
-            InlineKeyboardButton("❌ Cancel", callback_data=f'cancel:{message_id}'),
-        ]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-def get_role_selection_keyboard(roles):
-    """Return an inline keyboard for role selection."""
-    keyboard = []
-    for role in roles:
-        display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
-        callback_data = f"role:{role}"
-        keyboard.append([InlineKeyboardButton(display_name, callback_data=callback_data)])
-    return InlineKeyboardMarkup(keyboard)
-
-# Define all handler functions that are referenced in ConversationHandlers
 
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger function when a Tara team member sends a specific user command."""
@@ -356,10 +396,22 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
         logger.error(f"No target user ID found in user_data for user {user_id}.")
         return ConversationHandler.END
 
+    # Ensure only the specific user is targeted
+    context.user_data['target_ids'] = [target_user_id]
+
+    # Retrieve the target user's display name
+    try:
+        target_user = await context.bot.get_chat(target_user_id)
+        target_display_name = get_display_name(target_user)
+    except Exception as e:
+        await message.reply_text(f"Failed to retrieve user information: {e}")
+        logger.error(f"Failed to get chat for user ID {target_user_id}: {e}")
+        return ConversationHandler.END
+
     # Store the message and targets for confirmation
     context.user_data['message_to_send'] = message
     context.user_data['target_ids'] = [target_user_id]
-    context.user_data['target_roles'] = ['specific_user']
+    context.user_data['sender_role'] = 'tara_team'
 
     if message.document:
         content_description = f"PDF: `{message.document.file_name}`"
@@ -369,7 +421,7 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
         content_description = "Unsupported message type."
 
     confirmation_text = (
-        f"📩 *You are about to send the following to `@{target_username}`:*\n\n"
+        f"📩 *You are about to send the following to `{target_display_name}`:*\n\n"
         f"{content_description}\n\n"
         "Do you want to send this?"
     )
@@ -532,8 +584,8 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         await message.reply_text("Please send PDF documents or text messages only.")
         logger.warning(f"User {user_id} sent an unsupported message type.")
-    
-    return
+
+    return CONFIRMATION
 
 async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the role selection from the user."""
@@ -631,51 +683,6 @@ async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     return CONFIRMATION
 
-# ------------------ Conversation Handlers ------------------
-
-# Define the ConversationHandler for specific user commands
-specific_user_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$'), specific_user_trigger)],
-    states={
-        SPECIFIC_USER_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# Define the ConversationHandler for specific team commands
-specific_team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
-    states={
-        SPECIFIC_TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# Define the ConversationHandler for general team messages (-team)
-team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-team$'), team_trigger)],
-    states={
-        SELECT_ROLE: [CallbackQueryHandler(select_role_handler)],
-        TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# Define the ConversationHandler for Tara team messages (-t)
-tara_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
-    states={
-        TARA_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# ------------------ Command Handlers ------------------
-
 async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming messages and forward them based on user roles."""
     message = update.message
@@ -771,12 +778,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username_lower = user.username.lower()
     user_data_store[username_lower] = user.id
     logger.info(f"User {user.id} with username '{username_lower}' started the bot.")
-    
+
     # Save to JSON file
     save_user_data()
 
+    display_name = get_display_name(user)
+
     await update.message.reply_text(
-        f"Hello, {user.first_name}! Welcome to the Team Communication Bot.\n\n"
+        f"Hello, {display_name}! Welcome to the Team Communication Bot.\n\n"
         "Feel free to send messages using the available commands."
     )
 
@@ -842,7 +851,7 @@ async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username_lower = user.username.lower()
     user_data_store[username_lower] = user.id
     logger.info(f"User {user.id} with username '{username_lower}' refreshed their info.")
-    
+
     # Save to JSON file
     save_user_data()
 
@@ -981,43 +990,74 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
     logger.info(f"User {user_id} requested the list of muted users.")
 
-# ------------------ Helper Functions ------------------
+# ------------------ Conversation Handlers ------------------
 
-async def send_confirmation(message, context, sender_role, target_ids):
-    """Send a confirmation message with inline buttons for a specific document or text."""
-    if message.document:
-        content_description = f"PDF: `{message.document.file_name}`"
-    elif message.text:
-        content_description = f"Message: `{message.text}`"
-    else:
-        content_description = "Unsupported message type."
+# Define the ConversationHandler for specific user commands
+specific_user_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$'), specific_user_trigger)],
+    states={
+        SPECIFIC_USER_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
 
-    confirmation_text = (
-        f"📩 *You are about to send the following to **{', '.join([ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in SENDING_ROLE_TARGETS.get(sender_role, [])])}**:*\n\n"
-        f"{content_description}\n\n"
-        "Do you want to send this?"
-    )
+# Define the ConversationHandler for specific team commands
+specific_team_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
+    states={
+        SPECIFIC_TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
 
-    # Use the message ID to uniquely identify the confirmation
-    callback_data_confirm = f"confirm:{message.message_id}"
-    callback_data_cancel = f"cancel:{message.message_id}"
+# Define the ConversationHandler for general team messages (-team)
+team_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-team$'), team_trigger)],
+    states={
+        SELECT_ROLE: [CallbackQueryHandler(select_role_handler)],
+        TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
 
-    keyboard = [
-        [
-            InlineKeyboardButton("✅ Confirm", callback_data=callback_data_confirm),
-            InlineKeyboardButton("❌ Cancel", callback_data=callback_data_cancel),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+# Define the ConversationHandler for Tara team messages (-t)
+tara_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
+    states={
+        TARA_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
 
-    await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
+# ------------------ Command Handlers ------------------
 
-    # Store necessary data in context.user_data with a unique key
-    context.user_data[f'confirm_{message.message_id}'] = {
-        'message': message,
-        'target_ids': target_ids,
-        'sender_role': sender_role
-    }
+# Add the /start command handler
+start_handler = CommandHandler('start', start)
+
+# Add the /listusers command handler
+list_users_handler = CommandHandler('listusers', list_users)
+
+# Add the /help command handler
+help_handler = CommandHandler('help', help_command)
+
+# Add the /refresh command handler
+refresh_handler = CommandHandler('refresh', refresh)
+
+# Add the /mute command handler (only for Tara Team)
+mute_handler = CommandHandler('mute', mute_command)
+
+# Add the /muteid command handler (only for Tara Team)
+mute_id_handler = CommandHandler('muteid', mute_id_command)
+
+# Add the /unmuteid command handler (only for Tara Team)
+unmute_id_handler = CommandHandler('unmuteid', unmute_id_command)
+
+# Add the /listmuted command handler (only for Tara Team)
+list_muted_handler = CommandHandler('listmuted', list_muted_command)
 
 # ------------------ Main Function ------------------
 
@@ -1031,59 +1071,32 @@ def main():
     # Build the application
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Add handlers...
-
-    # Add the /start command handler
-    start_handler = CommandHandler('start', start)
+    # Add command handlers
     application.add_handler(start_handler)
-
-    # Add the /listusers command handler
-    list_users_handler = CommandHandler('listusers', list_users)
     application.add_handler(list_users_handler)
-
-    # Add the /help command handler
-    help_handler = CommandHandler('help', help_command)
     application.add_handler(help_handler)
-
-    # Add the /refresh command handler
-    refresh_handler = CommandHandler('refresh', refresh)
     application.add_handler(refresh_handler)
-
-    # Add the /mute command handler (only for Tara Team)
-    mute_handler = CommandHandler('mute', mute_command)
     application.add_handler(mute_handler)
-
-    # Add the /muteid command handler (only for Tara Team)
-    mute_id_handler = CommandHandler('muteid', mute_id_command)
     application.add_handler(mute_id_handler)
-
-    # Add the /unmuteid command handler (only for Tara Team)
-    unmute_id_handler = CommandHandler('unmuteid', unmute_id_command)
     application.add_handler(unmute_id_handler)
-
-    # Add the /listmuted command handler (only for Tara Team)
-    list_muted_handler = CommandHandler('listmuted', list_muted_command)
     application.add_handler(list_muted_handler)
 
-    # Add the ConversationHandler for specific user commands
+    # Add ConversationHandlers
     application.add_handler(specific_user_conv_handler)
-
-    # Add the ConversationHandler for specific team commands
     application.add_handler(specific_team_conv_handler)
-
-    # Add the ConversationHandler for general team messages (-team)
     application.add_handler(team_conv_handler)
-
-    # Add the ConversationHandler for Tara team messages (-t)
     application.add_handler(tara_conv_handler)
 
     # Add the Confirmation CallbackQueryHandler
     confirmation_handler_conv = CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')
     application.add_handler(confirmation_handler_conv)
 
-    # Handle all other text and document messages, excluding commands
+    # Handle all other text and document messages, excluding commands and specific triggers
     message_handler = MessageHandler(
-        (filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, 
+        (filters.TEXT | filters.Document.ALL) & 
+        ~filters.COMMAND & 
+        ~filters.Regex(r'^-@') & 
+        ~filters.Regex(r'^-(w|e|mcq|d|de|mf|t)$'), 
         handle_general_message
     )
     application.add_handler(message_handler)
