@@ -144,8 +144,8 @@ if MUTED_USERS_FILE.exists():
         except json.JSONDecodeError:
             muted_users = set()
             logger.error("muted_users.json is not a valid JSON file. Starting with an empty muted users set.")
-else:
-    muted_users = set()
+    else:
+        muted_users = set()
 
 def save_muted_users():
     """Save the muted_users set to a JSON file."""
@@ -541,9 +541,11 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Write your message for your team and Tara Team.")
         return TEAM_MESSAGE
 
-async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, message=None):
     """Handle the team message after the general trigger and ask for confirmation."""
-    message = update.message
+    if message is None:
+        message = update.message
+
     user_id = message.from_user.id
     selected_role = context.user_data.get('sender_role')
 
@@ -598,12 +600,9 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Remove the pending message from user_data
         del context.user_data['pending_message']
 
-        # Set the message in the update object for processing
-        update.message = pending_message
-
         # Proceed to handle the message
         await query.edit_message_text("Processing your message...")
-        await team_message_handler(update, context)
+        await team_message_handler(update, context, message=pending_message)
     else:
         await query.edit_message_text("Invalid role selection.")
         logger.warning(f"User {query.from_user.id} sent invalid role selection: {data}")
