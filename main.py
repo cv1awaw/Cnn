@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import json
+import asyncio  # Import asyncio for async functions
 from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaDocument
 from telegram.ext import (
@@ -166,12 +167,12 @@ def get_display_name(user):
         full_name = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
         return full_name
 
-def get_confirmation_keyboard(message_id):
+def get_confirmation_keyboard(confirmation_id):
     """Return an inline keyboard for confirmation with unique callback data."""
     keyboard = [
         [
-            InlineKeyboardButton("✅ Confirm", callback_data=f'confirm:{message_id}'),
-            InlineKeyboardButton("❌ Cancel", callback_data=f'cancel:{message_id}'),
+            InlineKeyboardButton("✅ Confirm", callback_data=f'confirm:{confirmation_id}'),
+            InlineKeyboardButton("❌ Cancel", callback_data=f'cancel:{confirmation_id}'),
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -387,6 +388,19 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     return ConversationHandler.END
 
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle incoming messages, including media groups."""
+    message = update.message
+    user_id = message.from_user.id
+
+    # Check if the message is part of a media group
+    if message.media_group_id:
+        # Handle media group
+        await handle_media_group(update, context)
+    else:
+        # Handle single message
+        await process_message(update, context, message=message)
+
 async def handle_media_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming media groups (albums)."""
     message = update.message
@@ -596,15 +610,17 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.warning(f"User {query.from_user.id} sent invalid role selection: {data}")
         return ConversationHandler.END
 
+# ------------------ Conversation Handlers ------------------
+
 # Modify the conversation handler to include media group handling
 general_conv_handler = ConversationHandler(
     entry_points=[
         MessageHandler(
-            (filters.TEXT | filters.Document.ALL | filters.MEDIA_GROUP) &
+            (filters.TEXT | filters.Document.ALL | filters.PHOTO | filters.VIDEO | filters.ATTACHMENT) &
             ~filters.COMMAND &
             ~filters.Regex(re.compile(r'^-@')) &
             ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team)$', re.IGNORECASE)),
-            handle_media_group
+            handle_message
         )
     ],
     states={
@@ -614,6 +630,8 @@ general_conv_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
 )
+
+# ... [Rest of the code remains the same, including other handlers and main() function] ...
 
 # ------------------ Error Handler ------------------
 
@@ -628,8 +646,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Main function to start the Telegram bot."""
-    import asyncio  # Import asyncio for async functions
-
     BOT_TOKEN = os.getenv('BOT_TOKEN')
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN is not set in environment variables.")
