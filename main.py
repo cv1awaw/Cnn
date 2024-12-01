@@ -449,7 +449,8 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
         logger.warning(f"Unauthorized access attempt by user {user_id} for specific team triggers.")
         return ConversationHandler.END
 
-    message = update.message.text.lower().strip()
+    message_text = update.message.text.strip()
+    message = message_text.lower()
     target_roles = TRIGGER_TARGET_MAP.get(message)
 
     if not target_roles:
@@ -996,7 +997,7 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # Define the ConversationHandler for specific user commands
 specific_user_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', flags=re.IGNORECASE), specific_user_trigger)],
+    entry_points=[MessageHandler(filters.Regex(re.compile(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', re.IGNORECASE)), specific_user_trigger)],
     states={
         SPECIFIC_USER_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)],
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
@@ -1006,7 +1007,7 @@ specific_user_conv_handler = ConversationHandler(
 
 # Define the ConversationHandler for specific team commands
 specific_team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'^-(w|e|mcq|d|de|mf|c)$', flags=re.IGNORECASE), specific_team_trigger)],
+    entry_points=[MessageHandler(filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|c)$', re.IGNORECASE)), specific_team_trigger)],
     states={
         SPECIFIC_TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)],
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
@@ -1016,7 +1017,7 @@ specific_team_conv_handler = ConversationHandler(
 
 # Define the ConversationHandler for general team messages (-team)
 team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-team$'), team_trigger)],
+    entry_points=[MessageHandler(filters.Regex(re.compile(r'^-team$', re.IGNORECASE)), team_trigger)],
     states={
         SELECT_ROLE: [CallbackQueryHandler(select_role_handler)],
         TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)],
@@ -1027,7 +1028,7 @@ team_conv_handler = ConversationHandler(
 
 # Define the ConversationHandler for Tara team messages (-t)
 tara_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-t$'), tara_trigger)],
+    entry_points=[MessageHandler(filters.Regex(re.compile(r'^-t$', re.IGNORECASE)), tara_trigger)],
     states={
         TARA_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)],
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
@@ -1097,8 +1098,8 @@ def main():
     message_handler = MessageHandler(
         (filters.TEXT | filters.Document.ALL) &
         ~filters.COMMAND &
-        ~filters.Regex(r'^-@') &
-        ~filters.Regex(r'^-(w|e|mcq|d|de|mf|t|c)$', flags=re.IGNORECASE),
+        ~filters.Regex(re.compile(r'^-@')) &
+        ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c)$', re.IGNORECASE)),
         handle_general_message
     )
     application.add_handler(message_handler)
