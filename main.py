@@ -23,7 +23,7 @@ from roles import (
     DESIGN_TEAM_IDS,
     KING_TEAM_IDS,
     TARA_TEAM_IDS,
-    MIND_MAP_FORM_CREATOR_IDS,  # Newly added
+    MIND_MAP_FORM_CREATOR_IDS,
 )
 
 # ------------------ Setup Logging ------------------
@@ -46,7 +46,7 @@ ROLE_MAP = {
     'design_team': DESIGN_TEAM_IDS,
     'king_team': KING_TEAM_IDS,
     'tara_team': TARA_TEAM_IDS,
-    'mind_map_form_creator': MIND_MAP_FORM_CREATOR_IDS,  # Newly added
+    'mind_map_form_creator': MIND_MAP_FORM_CREATOR_IDS,
 }
 
 # Define display names for each role
@@ -58,7 +58,7 @@ ROLE_DISPLAY_NAMES = {
     'design_team': 'Design Team',
     'king_team': 'Admin Team',
     'tara_team': 'Tara Team',
-    'mind_map_form_creator': 'Mind Map & Form Creation Team',  # Newly added
+    'mind_map_form_creator': 'Mind Map & Form Creation Team',
 }
 
 # Define trigger to target roles mapping
@@ -90,9 +90,9 @@ SENDING_ROLE_TARGETS = {
 TEAM_MESSAGE = 1
 SPECIFIC_TEAM_MESSAGE = 2
 SPECIFIC_USER_MESSAGE = 3
-TARA_MESSAGE = 4  # Newly added
-CONFIRMATION = 5  # Newly added state for confirmation
-SELECT_ROLE = 6    # Newly added state for role selection
+TARA_MESSAGE = 4
+CONFIRMATION = 5
+SELECT_ROLE = 6
 
 # ------------------ User Data Storage ------------------
 
@@ -602,13 +602,14 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         # Proceed to handle the message
         await query.edit_message_text("Processing your message...")
-        await team_message_handler(update, context, message=pending_message)
+        # Capture the state returned by team_message_handler
+        state = await team_message_handler(update, context, message=pending_message)
+        # Return the state to continue the conversation
+        return state
     else:
         await query.edit_message_text("Invalid role selection.")
         logger.warning(f"User {query.from_user.id} sent invalid role selection: {data}")
         return ConversationHandler.END
-
-    return ConversationHandler.END
 
 async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the -t trigger to send a message to Tara team."""
