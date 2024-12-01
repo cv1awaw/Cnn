@@ -6,7 +6,14 @@ import re
 import json
 import asyncio
 from pathlib import Path
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaDocument
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaDocument,
+    InputMediaPhoto,
+    InputMediaVideo,
+)
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -199,10 +206,22 @@ async def forward_message(bot, message, target_ids, sender_role, media_group=Non
                     caption=caption if msg == media_group[0] else None,
                     parse_mode='Markdown' if msg == media_group[0] else None
                 )
-                media_group_to_send.append(media)
+            elif msg.photo:
+                media = InputMediaPhoto(
+                    media=msg.photo[-1].file_id,
+                    caption=caption if msg == media_group[0] else None,
+                    parse_mode='Markdown' if msg == media_group[0] else None
+                )
+            elif msg.video:
+                media = InputMediaVideo(
+                    media=msg.video.file_id,
+                    caption=caption if msg == media_group[0] else None,
+                    parse_mode='Markdown' if msg == media_group[0] else None
+                )
             else:
-                # Handle other media types if needed
-                pass
+                # Skip unsupported media types
+                continue
+            media_group_to_send.append(media)
 
         for user_id in target_ids:
             try:
@@ -818,7 +837,7 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # ------------------ Conversation Handlers ------------------
 
-# Define the ConversationHandler for general messages
+# General conversation handler
 general_conv_handler = ConversationHandler(
     entry_points=[
         MessageHandler(
@@ -838,10 +857,7 @@ general_conv_handler = ConversationHandler(
     per_message=True,
 )
 
-# Define other ConversationHandlers (specific_user_conv_handler, specific_team_conv_handler, team_conv_handler, tara_conv_handler)
-# For brevity, I'll include one example, you should include the rest similarly.
-
-# ... Include definitions for specific_user_conv_handler, specific_team_conv_handler, etc.
+# You can add other ConversationHandlers for specific commands here if needed.
 
 # ------------------ Error Handler ------------------
 
@@ -876,7 +892,7 @@ def main():
 
     # Add ConversationHandlers
     application.add_handler(general_conv_handler)
-    # Add other ConversationHandlers (specific_user_conv_handler, etc.)
+    # Add other ConversationHandlers here if you have them
 
     # Add the error handler
     application.add_error_handler(error_handler)
