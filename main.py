@@ -5,10 +5,7 @@ import os
 import re
 import json
 from pathlib import Path
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup,
-    InputMediaDocument
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -96,7 +93,6 @@ SPECIFIC_USER_MESSAGE = 3
 TARA_MESSAGE = 4
 CONFIRMATION = 5
 SELECT_ROLE = 6
-CANCEL = ConversationHandler.END
 
 # ------------------ User Data Storage ------------------
 
@@ -181,14 +177,12 @@ def get_confirmation_keyboard(message_id):
     return InlineKeyboardMarkup(keyboard)
 
 def get_role_selection_keyboard(roles):
-    """Return an inline keyboard for role selection with a Cancel option."""
+    """Return an inline keyboard for role selection."""
     keyboard = []
     for role in roles:
         display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
         callback_data = f"role:{role}"
         keyboard.append([InlineKeyboardButton(display_name, callback_data=callback_data)])
-    # Add a Cancel button
-    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_role_selection')])
     return InlineKeyboardMarkup(keyboard)
 
 async def forward_message(bot, message, target_ids, sender_role):
@@ -286,11 +280,7 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the conversation."""
-    if update.callback_query:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text("Operation cancelled.")
-    else:
-        await update.message.reply_text("Operation cancelled.")
+    await update.message.reply_text("Operation cancelled.")
     return ConversationHandler.END
 
 async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -354,11 +344,6 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         # Clean up the stored data
         if f'confirm_{message_id}' in context.user_data:
             del context.user_data[f'confirm_{message_id}']
-
-    elif data == 'cancel_role_selection':
-        await query.edit_message_text("Operation cancelled.")
-        logger.info(f"User {query.from_user.id} cancelled role selection.")
-        return ConversationHandler.END
 
     else:
         await query.edit_message_text("Invalid choice.")
@@ -621,12 +606,6 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         state = await team_message_handler(update, context, message=pending_message)
         # Return the state to continue the conversation
         return state
-
-    elif data == 'cancel_role_selection':
-        await query.edit_message_text("Operation cancelled.")
-        logger.info(f"User {query.from_user.id} cancelled role selection.")
-        return ConversationHandler.END
-
     else:
         await query.edit_message_text("Invalid role selection.")
         logger.warning(f"User {query.from_user.id} sent invalid role selection: {data}")
@@ -744,8 +723,6 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
             return ConversationHandler.END
 
         return ConversationHandler.END
-
-# ------------------ Command Handlers ------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /start command."""
@@ -976,15 +953,6 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
     logger.info(f"User {user_id} requested the list of muted users.")
 
-# ------------------ Error Handler ------------------
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    """Log the error and send a message to the user if necessary."""
-    logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
-    # You can also notify the user about the error if needed
-    # if update and hasattr(update, 'message'):
-    #     await update.message.reply_text("An error occurred. Please try again later.")
-
 # ------------------ Conversation Handlers ------------------
 
 # Define the ConversationHandler for specific user commands
@@ -992,8 +960,7 @@ specific_user_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', re.IGNORECASE)), specific_user_trigger)],
     states={
         SPECIFIC_USER_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)],
-        # Add the confirmation handler to all states
-        ConversationHandler.ALL: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -1003,8 +970,7 @@ specific_team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|c)$', re.IGNORECASE)), specific_team_trigger)],
     states={
         SPECIFIC_TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)],
-        # Add the confirmation handler to all states
-        ConversationHandler.ALL: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -1013,14 +979,9 @@ specific_team_conv_handler = ConversationHandler(
 team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-team$', re.IGNORECASE)), team_trigger)],
     states={
-        SELECT_ROLE: [
-            CallbackQueryHandler(select_role_handler, pattern=r'^role:.*$|^cancel_role_selection$'),
-            # Add the confirmation handler to all states
-            CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$'),
-        ],
+        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^role:')],
         TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)],
-        # Add the confirmation handler to all states
-        ConversationHandler.ALL: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -1030,8 +991,7 @@ tara_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-t$', re.IGNORECASE)), tara_trigger)],
     states={
         TARA_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)],
-        # Add the confirmation handler to all states
-        ConversationHandler.ALL: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -1046,17 +1006,21 @@ general_conv_handler = ConversationHandler(
         handle_general_message
     )],
     states={
-        SELECT_ROLE: [
-            CallbackQueryHandler(select_role_handler, pattern=r'^role:.*$|^cancel_role_selection$'),
-            # Add the confirmation handler to all states
-            CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$'),
-        ],
-        # Add the confirmation handler to all states
-        ConversationHandler.ALL: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
+        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^role:')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
 )
+
+# ------------------ Error Handler ------------------
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Log the error and send a message to the user if necessary."""
+    logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
+    # You can also notify the user about the error if needed
+    # if update and hasattr(update, 'message'):
+    #     await update.message.reply_text("An error occurred. Please try again later.")
 
 # ------------------ Main Function ------------------
 
@@ -1085,7 +1049,7 @@ def main():
     application.add_handler(specific_team_conv_handler)
     application.add_handler(team_conv_handler)
     application.add_handler(tara_conv_handler)
-    application.add_handler(general_conv_handler)
+    application.add_handler(general_conv_handler)  # Newly added
 
     # Add the error handler
     application.add_error_handler(error_handler)
@@ -1096,3 +1060,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
