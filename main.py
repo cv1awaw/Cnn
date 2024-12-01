@@ -69,7 +69,7 @@ TRIGGER_TARGET_MAP = {
     '-d': ['word_team'],
     '-de': ['design_team'],
     '-mf': ['mind_map_form_creator'],
-    '-t': ['tara_team'],             # Newly added trigger for Tara Team
+    '-t': ['tara_team'],             # Now accessible by all roles
     '-c': ['checker_team'],          # Newly added trigger for Checker Team
 }
 
@@ -235,7 +235,7 @@ async def forward_message(bot, message, target_ids, sender_role):
         except Exception as e:
             logger.error(f"Failed to forward message or send role notification to {user_id}: {e}")
 
-async def send_confirmation(message, context, sender_role, target_ids):
+async def send_confirmation(message, context, sender_role, target_ids, target_roles=None):
     """Send a confirmation message with inline buttons for a specific document or text."""
     if message.document:
         content_description = f"PDF: `{message.document.file_name}`"
@@ -244,10 +244,13 @@ async def send_confirmation(message, context, sender_role, target_ids):
     else:
         content_description = "Unsupported message type."
 
-    target_roles = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in SENDING_ROLE_TARGETS.get(sender_role, [])]
+    if target_roles:
+        target_roles_display = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
+    else:
+        target_roles_display = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in SENDING_ROLE_TARGETS.get(sender_role, [])]
 
     confirmation_text = (
-        f"📩 *You are about to send the following to **{', '.join(target_roles)}**:*\n\n"
+        f"📩 *You are about to send the following to **{', '.join(target_roles_display)}**:*\n\n"
         f"{content_description}\n\n"
         "Do you want to send this?"
     )
@@ -270,7 +273,8 @@ async def send_confirmation(message, context, sender_role, target_ids):
     context.user_data[f'confirm_{message.message_id}'] = {
         'message': message,
         'target_ids': target_ids,
-        'sender_role': sender_role
+        'sender_role': sender_role,
+        'target_roles': target_roles if target_roles else SENDING_ROLE_TARGETS.get(sender_role, [])
     }
 
 # ------------------ Handler Functions ------------------
@@ -298,21 +302,22 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         message_to_send = confirm_data['message']
         target_ids = confirm_data['target_ids']
         sender_role = confirm_data['sender_role']
+        target_roles = confirm_data.get('target_roles', [])
 
         # Forward the message
         await forward_message(context.bot, message_to_send, target_ids, sender_role)
 
         # Prepare display names for confirmation
         sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
-        target_roles = SENDING_ROLE_TARGETS.get(sender_role, [])
-        recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles if r != 'specific_user']
 
-        if 'specific_user' in context.user_data.get('target_roles', []):
+        if 'specific_user' in target_roles:
             recipient_display_names = [get_display_name(await context.bot.get_chat(tid)) for tid in target_ids]
+        else:
+            recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles if r != 'specific_user']
 
         if message_to_send.document:
             confirmation_text = (
-                f"✅ *Your PDF `**{message_to_send.document.file_name}**` has been sent from **{sender_display_name}** "
+                f"✅ *Your PDF `{message_to_send.document.file_name}` has been sent from **{sender_display_name}** "
                 f"to **{', '.join(recipient_display_names)}**.*"
             )
         elif message_to_send.text:
@@ -375,7 +380,12 @@ async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TY
     # Store target user ID and other necessary data in user_data
     context.user_data['target_user_id'] = target_user_id
     context.user_data['target_username'] = target_username
-    context.user_data['sender_role'] = 'tara_team'  # Specific user command is handled by Tara Team
+
+    # Get sender's role
+    if roles:
+        context.user_data['sender_role'] = roles[0]  # Use the first role for simplicity
+    else:
+        context.user_data['sender_role'] = 'User'  # Default role if none found
 
     await update.message.reply_text(f"Write your message for user `@{target_username}`.", parse_mode='Markdown')
     return SPECIFIC_USER_MESSAGE
@@ -414,7 +424,11 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
     # Store the message and targets for confirmation
     context.user_data['message_to_send'] = message
     context.user_data['target_ids'] = [target_user_id]
-    context.user_data['sender_role'] = 'tara_team'
+
+    # Set target_roles to 'specific_user' for confirmation handling
+    context.user_data['target_roles'] = ['specific_user']
+
+    sender_role = context.user_data.get('sender_role')
 
     if message.document:
         content_description = f"PDF: `{message.document.file_name}`"
@@ -434,7 +448,8 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
     context.user_data[f'confirm_{message.message_id}'] = {
         'message': message,
         'target_ids': [target_user_id],
-        'sender_role': 'tara_team'
+        'sender_role': sender_role,
+        'target_roles': ['specific_user']
     }
 
     return CONFIRMATION
@@ -460,7 +475,12 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
 
     # Store target roles in user_data
     context.user_data['specific_target_roles'] = target_roles
-    context.user_data['sender_role'] = 'tara_team'  # Specific team commands are handled by Tara Team
+
+    # Get sender's role
+    if roles:
+        context.user_data['sender_role'] = roles[0]  # Use the first role for simplicity
+    else:
+        context.user_data['sender_role'] = 'User'  # Default role if none found
 
     await update.message.reply_text("Write your message for your team.")
     return SPECIFIC_TEAM_MESSAGE
@@ -495,6 +515,8 @@ async def specific_team_message_handler(update: Update, context: ContextTypes.DE
     context.user_data['target_ids'] = list(target_ids)
     context.user_data['target_roles'] = target_roles
 
+    sender_role = context.user_data.get('sender_role')
+
     if message.document:
         content_description = f"PDF: `{message.document.file_name}`"
     elif message.text:
@@ -513,7 +535,8 @@ async def specific_team_message_handler(update: Update, context: ContextTypes.DE
     context.user_data[f'confirm_{message.message_id}'] = {
         'message': message,
         'target_ids': list(target_ids),
-        'sender_role': 'tara_team'
+        'sender_role': sender_role,
+        'target_roles': target_roles
     }
 
     return CONFIRMATION
@@ -632,18 +655,24 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
-    # All users can use -t to send messages to Tara Team
+    if not roles:
+        await update.message.reply_text("You don't have a role assigned to use this bot.")
+        logger.warning(f"User {user_id} attempted to use -t without a role.")
+        return ConversationHandler.END
+
+    # Store the user's role
+    context.user_data['sender_role'] = roles[0]  # Use the first role for simplicity
+
     await update.message.reply_text("Write your message for the Tara Team.")
-    context.user_data['sender_role'] = 'tara_team'  # Fixed target
     return TARA_MESSAGE
 
 async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the message intended for Tara team and ask for confirmation."""
     message = update.message
     user_id = message.from_user.id
-    selected_role = context.user_data.get('sender_role')
+    sender_role = context.user_data.get('sender_role')
 
-    if not selected_role:
+    if not sender_role:
         await message.reply_text("You don't have a role assigned to use this bot.")
         logger.warning(f"Unauthorized access attempt by user {user_id}")
         return ConversationHandler.END
@@ -656,7 +685,7 @@ async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if not target_ids:
         await message.reply_text("No recipients found to send your message.")
-        logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
+        logger.warning(f"No recipients found for user {user_id} with role '{sender_role}'.")
         return ConversationHandler.END
 
     # Store the message and targets for confirmation
@@ -671,19 +700,7 @@ async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         content_description = "Unsupported message type."
 
-    confirmation_text = (
-        f"📩 *You are about to send the following to **Tara Team**:*\n\n"
-        f"{content_description}\n\n"
-        "Do you want to send this?"
-    )
-    await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=get_confirmation_keyboard(message.message_id))
-
-    # Store confirmation data
-    context.user_data[f'confirm_{message.message_id}'] = {
-        'message': message,
-        'target_ids': list(target_ids),
-        'sender_role': selected_role
-    }
+    await send_confirmation(message, context, sender_role, list(target_ids), target_roles=target_roles)
 
     return CONFIRMATION
 
@@ -823,16 +840,19 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/mute [user_id] - Mute yourself or another user.\n"
         "/muteid <user_id> - Mute a specific user by their ID.\n"
         "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
-        "/listmuted - List all currently muted users.\n"
+        "/listmuted - List all currently muted users.\n\n"
+        "*Message Sending Triggers:*\n"
+        "`-team` - Send a message to your own team and Tara Team.\n"
+        "`-t` - Send a message exclusively to the Tara Team.\n"
+        "`-@username` - *(Tara Team only)* Send a message to a specific user.\n\n"
+        "*Tara Team Specific Triggers:*\n"
         "`-w` - Send a message to the Writer Team and Tara Team.\n"
         "`-e` - Send a message to the Editor Team and Tara Team.\n"
         "`-mcq` - Send a message to the MCQs Team and Tara Team.\n"
         "`-d` - Send a message to the Digital Writers and Tara Team.\n"
         "`-de` - Send a message to the Design Team and Tara Team.\n"
         "`-mf` - Send a message to the Mind Map & Form Creation Team and Tara Team.\n"
-        "`-c` - Send a message to the Editor Team and Tara Team.\n"
-        "`-t` - Send a message exclusively to the Tara Team.\n"
-        "`-@username` - Send a message to a specific user.\n\n"
+        "`-c` - Send a message to the Editor Team and Tara Team.\n\n"
         "📌 *Notes:*\n"
         "- Only Tara Team members can use the side commands and `-@username` command.\n"
         "- Use `/cancel` to cancel any ongoing operation."
