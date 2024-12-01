@@ -6,7 +6,6 @@ import re
 import json
 import uuid
 from pathlib import Path
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -17,46 +16,27 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
 )
+from roles import (
+    WRITER_IDS,
+    MCQS_TEAM_IDS,
+    CHECKER_TEAM_IDS,
+    WORD_TEAM_IDS,
+    DESIGN_TEAM_IDS,
+    KING_TEAM_IDS,
+    TARA_TEAM_IDS,
+    MIND_MAP_FORM_CREATOR_IDS,  # Newly added
+)
 
 # ------------------ Setup Logging ------------------
 
-# Configure logging to display time, name, level, and message
+# Enable logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO  # Change to DEBUG for more detailed logs
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
 # ------------------ Define Roles ------------------
-
-# Assuming roles.py contains lists of user IDs for each role
-# Example:
-# WRITER_IDS = [123456789, 987654321]
-# MCQS_TEAM_IDS = [234567890, 876543219]
-# ... and so on for other roles
-
-# Import roles from roles.py
-try:
-    from roles import (
-        WRITER_IDS,
-        MCQS_TEAM_IDS,
-        CHECKER_TEAM_IDS,
-        WORD_TEAM_IDS,
-        DESIGN_TEAM_IDS,
-        KING_TEAM_IDS,
-        TARA_TEAM_IDS,
-        MIND_MAP_FORM_CREATOR_IDS,  # Newly added
-    )
-except ImportError:
-    logger.error("Failed to import roles from roles.py. Please ensure roles.py exists and is correctly formatted.")
-    WRITER_IDS = []
-    MCQS_TEAM_IDS = []
-    CHECKER_TEAM_IDS = []
-    WORD_TEAM_IDS = []
-    DESIGN_TEAM_IDS = []
-    KING_TEAM_IDS = []
-    TARA_TEAM_IDS = []
-    MIND_MAP_FORM_CREATOR_IDS = []
 
 # Define roles and their corresponding IDs
 ROLE_MAP = {
@@ -94,7 +74,7 @@ TRIGGER_TARGET_MAP = {
 }
 
 # Define target roles for each role
-# Ensures that other roles can only send messages to 'tara_team' and their own role
+# Adjusted to ensure that other roles can only send messages to 'tara_team' and their own role
 SENDING_ROLE_TARGETS = {
     'writer': ['writer', 'tara_team'],
     'mcqs_team': ['mcqs_team', 'tara_team'],
@@ -186,6 +166,27 @@ def get_display_name(user):
     else:
         full_name = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
         return full_name
+
+def get_confirmation_keyboard(uuid_str):
+    """Return an inline keyboard for confirmation with unique callback data."""
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Confirm", callback_data=f'confirm:{uuid_str}'),
+            InlineKeyboardButton("❌ Cancel", callback_data=f'cancel:{uuid_str}'),
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_role_selection_keyboard(roles):
+    """Return an inline keyboard for role selection with a Cancel option."""
+    keyboard = []
+    for role in roles:
+        display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
+        callback_data = f"role:{role}"
+        keyboard.append([InlineKeyboardButton(display_name, callback_data=callback_data)])
+    # Add a Cancel button
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_role_selection')])
+    return InlineKeyboardMarkup(keyboard)
 
 async def forward_message(bot, message, target_ids, sender_role):
     """Forward a document or text message to a list of target user IDs and notify about the sender's role."""
@@ -413,7 +414,7 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
     # Ensure only the specific user is targeted
     context.user_data['target_ids'] = [target_user_id]
     context.user_data['target_roles'] = ['specific_user']
-    sender_role = context.user_data.get('sender_role', 'Tara Team')
+    sender_role = context.user_data.get('sender_role', 'tara_team')  # Default to 'tara_team'
 
     # Retrieve the target user's display name
     try:
@@ -488,7 +489,7 @@ async def specific_team_message_handler(update: Update, context: ContextTypes.DE
     context.user_data['message_to_send'] = message
     context.user_data['target_ids'] = list(target_ids)
     context.user_data['target_roles'] = target_roles
-    sender_role = context.user_data.get('sender_role', 'Tara Team')
+    sender_role = context.user_data.get('sender_role', 'tara_team')
 
     if message.document:
         content_description = f"PDF: `{message.document.file_name}`"
@@ -1033,6 +1034,32 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     if isinstance(update, Update) and update.message:
         await update.message.reply_text("An error occurred. Please try again later.")
 
+# ------------------ Command Handlers ------------------
+
+# Add the /start command handler
+start_handler = CommandHandler('start', start)
+
+# Add the /listusers command handler
+list_users_handler = CommandHandler('listusers', list_users)
+
+# Add the /help command handler
+help_handler = CommandHandler('help', help_command)
+
+# Add the /refresh command handler
+refresh_handler = CommandHandler('refresh', refresh)
+
+# Add the /mute command handler (only for Tara Team)
+mute_handler = CommandHandler('mute', mute_command)
+
+# Add the /muteid command handler (only for Tara Team)
+mute_id_handler = CommandHandler('muteid', mute_id_command)
+
+# Add the /unmuteid command handler (only for Tara Team)
+unmute_id_handler = CommandHandler('unmuteid', unmute_id_command)
+
+# Add the /listmuted command handler (only for Tara Team)
+list_muted_handler = CommandHandler('listmuted', list_muted_command)
+
 # ------------------ Main Function ------------------
 
 def main():
@@ -1046,14 +1073,14 @@ def main():
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
     # Add command handlers
-    application.add_handler(CommandHandler('start', start))
-    application.add_handler(CommandHandler('listusers', list_users))
-    application.add_handler(CommandHandler('help', help_command))
-    application.add_handler(CommandHandler('refresh', refresh))
-    application.add_handler(CommandHandler('mute', mute_command))
-    application.add_handler(CommandHandler('muteid', mute_id_command))
-    application.add_handler(CommandHandler('unmuteid', unmute_id_command))
-    application.add_handler(CommandHandler('listmuted', list_muted_command))
+    application.add_handler(start_handler)
+    application.add_handler(list_users_handler)
+    application.add_handler(help_handler)
+    application.add_handler(refresh_handler)
+    application.add_handler(mute_handler)
+    application.add_handler(mute_id_handler)
+    application.add_handler(unmute_id_handler)
+    application.add_handler(list_muted_handler)
 
     # Add ConversationHandlers
     application.add_handler(specific_user_conv_handler)
