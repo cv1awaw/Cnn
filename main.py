@@ -992,7 +992,8 @@ specific_user_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', re.IGNORECASE)), specific_user_trigger)],
     states={
         SPECIFIC_USER_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
+        # Add the confirmation handler to all states
+        ConversationHandler.ALL: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -1002,7 +1003,8 @@ specific_team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|c)$', re.IGNORECASE)), specific_team_trigger)],
     states={
         SPECIFIC_TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
+        # Add the confirmation handler to all states
+        ConversationHandler.ALL: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -1011,9 +1013,14 @@ specific_team_conv_handler = ConversationHandler(
 team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-team$', re.IGNORECASE)), team_trigger)],
     states={
-        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern=r'^role:.*$|^cancel_role_selection$')],
+        SELECT_ROLE: [
+            CallbackQueryHandler(select_role_handler, pattern=r'^role:.*$|^cancel_role_selection$'),
+            # Add the confirmation handler to all states
+            CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$'),
+        ],
         TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
+        # Add the confirmation handler to all states
+        ConversationHandler.ALL: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -1023,7 +1030,8 @@ tara_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-t$', re.IGNORECASE)), tara_trigger)],
     states={
         TARA_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
+        # Add the confirmation handler to all states
+        ConversationHandler.ALL: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -1038,8 +1046,13 @@ general_conv_handler = ConversationHandler(
         handle_general_message
     )],
     states={
-        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern=r'^role:.*$|^cancel_role_selection$')],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
+        SELECT_ROLE: [
+            CallbackQueryHandler(select_role_handler, pattern=r'^role:.*$|^cancel_role_selection$'),
+            # Add the confirmation handler to all states
+            CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$'),
+        ],
+        # Add the confirmation handler to all states
+        ConversationHandler.ALL: [CallbackQueryHandler(confirmation_handler, pattern=r'^confirm:.*|^cancel:.*$')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
