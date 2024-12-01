@@ -70,6 +70,7 @@ TRIGGER_TARGET_MAP = {
     '-de': ['design_team'],
     '-mf': ['mind_map_form_creator'],
     '-t': ['tara_team'],             # Newly added trigger for Tara Team
+    '-c': ['checker_team'],          # Newly added trigger for Checker Team
 }
 
 # Define target roles for each role
@@ -243,8 +244,10 @@ async def send_confirmation(message, context, sender_role, target_ids):
     else:
         content_description = "Unsupported message type."
 
+    target_roles = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in SENDING_ROLE_TARGETS.get(sender_role, [])]
+
     confirmation_text = (
-        f"📩 *You are about to send the following to **{', '.join([ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in SENDING_ROLE_TARGETS.get(sender_role, [])])}**:*\n\n"
+        f"📩 *You are about to send the following to **{', '.join(target_roles)}**:*\n\n"
         f"{content_description}\n\n"
         "Do you want to send this?"
     )
@@ -355,7 +358,7 @@ async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TY
         return ConversationHandler.END
 
     # Extract username from the command using regex
-    match = re.match(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$', update.message.text)
+    match = re.match(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', update.message.text, re.IGNORECASE)
     if not match:
         await update.message.reply_text("Invalid format. Please use `-@username` to target a user.", parse_mode='Markdown')
         logger.warning(f"Invalid user command format from user {user_id}.")
@@ -819,19 +822,18 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/mute [user_id] - Mute yourself or another user.\n"
         "/muteid <user_id> - Mute a specific user by their ID.\n"
         "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
-        "/listmuted - List all currently muted users.\n\n"
-        "*Message Sending Triggers:*\n"
-        "`-team` - Send a message to your own team and Tara Team.\n"
+        "/listmuted - List all currently muted users.\n"
         "`-w` - Send a message to the Writer Team and Tara Team.\n"
         "`-e` - Send a message to the Editor Team and Tara Team.\n"
         "`-mcq` - Send a message to the MCQs Team and Tara Team.\n"
         "`-d` - Send a message to the Digital Writers and Tara Team.\n"
         "`-de` - Send a message to the Design Team and Tara Team.\n"
         "`-mf` - Send a message to the Mind Map & Form Creation Team and Tara Team.\n"
+        "`-c` - Send a message to the Editor Team and Tara Team.\n"
         "`-t` - Send a message exclusively to the Tara Team.\n"
-        "`-@username` - *(Tara Team only)* Send a message to a specific user.\n\n"
+        "`-@username` - Send a message to a specific user.\n\n"
         "📌 *Notes:*\n"
-        "- Only authorized roles can use specific commands.\n"
+        "- Only Tara Team members can use the side commands and `-@username` command.\n"
         "- Use `/cancel` to cancel any ongoing operation."
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
@@ -994,7 +996,7 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # Define the ConversationHandler for specific user commands
 specific_user_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^\s*-\@([A-Za-z0-9_]{5,32})\s*$'), specific_user_trigger)],
+    entry_points=[MessageHandler(filters.Regex(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', flags=re.IGNORECASE), specific_user_trigger)],
     states={
         SPECIFIC_USER_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)],
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
@@ -1004,7 +1006,7 @@ specific_user_conv_handler = ConversationHandler(
 
 # Define the ConversationHandler for specific team commands
 specific_team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r'(?i)^-(w|e|mcq|d|de|mf)$'), specific_team_trigger)],
+    entry_points=[MessageHandler(filters.Regex(r'^-(w|e|mcq|d|de|mf|c)$', flags=re.IGNORECASE), specific_team_trigger)],
     states={
         SPECIFIC_TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)],
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler)],
@@ -1093,10 +1095,10 @@ def main():
 
     # Handle all other text and document messages, excluding commands and specific triggers
     message_handler = MessageHandler(
-        (filters.TEXT | filters.Document.ALL) & 
-        ~filters.COMMAND & 
-        ~filters.Regex(r'^-@') & 
-        ~filters.Regex(r'^-(w|e|mcq|d|de|mf|t)$'), 
+        (filters.TEXT | filters.Document.ALL) &
+        ~filters.COMMAND &
+        ~filters.Regex(r'^-@') &
+        ~filters.Regex(r'^-(w|e|mcq|d|de|mf|t|c)$', flags=re.IGNORECASE),
         handle_general_message
     )
     application.add_handler(message_handler)
