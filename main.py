@@ -574,6 +574,7 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         await message.reply_text("Please send PDF documents or text messages only.")
         logger.warning(f"User {user_id} sent an unsupported message type.")
+        return ConversationHandler.END
 
     return CONFIRMATION
 
@@ -607,6 +608,8 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text("Invalid role selection.")
         logger.warning(f"User {query.from_user.id} sent invalid role selection: {data}")
         return ConversationHandler.END
+
+    return ConversationHandler.END
 
 async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the -t trigger to send a message to Tara team."""
@@ -659,7 +662,7 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
     """Handle incoming messages and forward them based on user roles."""
     message = update.message
     if not message:
-        return  # Ignore non-message updates
+        return ConversationHandler.END  # Ignore non-message updates
 
     user_id = message.from_user.id
     username = message.from_user.username
@@ -668,7 +671,7 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
     if user_id in muted_users:
         await message.reply_text("You have been muted and cannot send messages through this bot.")
         logger.info(f"Muted user {user_id} attempted to send a message.")
-        return
+        return ConversationHandler.END
 
     # Store the username and user_id if username exists
     if username:
@@ -687,7 +690,7 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
     if not roles:
         await message.reply_text("You don't have a role assigned to use this bot.")
         logger.warning(f"Unauthorized access attempt by user {user_id}")
-        return
+        return ConversationHandler.END
 
     logger.info(f"Received message from user {user_id} with roles '{roles}'")
 
@@ -717,8 +720,9 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         else:
             await message.reply_text("Please send PDF documents or text messages only.")
             logger.warning(f"User {user_id} sent an unsupported message type.")
+            return ConversationHandler.END
 
-    return
+        return ConversationHandler.END
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /start command."""
@@ -975,7 +979,7 @@ specific_team_conv_handler = ConversationHandler(
 team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-team$', re.IGNORECASE)), team_trigger)],
     states={
-        SELECT_ROLE: [CallbackQueryHandler(select_role_handler)],
+        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^role:')],
         TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)],
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')],
     },
@@ -990,6 +994,23 @@ tara_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
+)
+
+# Define the ConversationHandler for general messages
+general_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(
+        (filters.TEXT | filters.Document.ALL) &
+        ~filters.COMMAND &
+        ~filters.Regex(re.compile(r'^-@')) &
+        ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team)$', re.IGNORECASE)),
+        handle_general_message
+    )],
+    states={
+        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^role:')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+    allow_reentry=True,
 )
 
 # ------------------ Command Handlers ------------------
@@ -1054,16 +1075,10 @@ def main():
     application.add_handler(specific_team_conv_handler)
     application.add_handler(team_conv_handler)
     application.add_handler(tara_conv_handler)
+    application.add_handler(general_conv_handler)  # Newly added
 
-    # Handle all other text and document messages, excluding commands and specific triggers
-    message_handler = MessageHandler(
-        (filters.TEXT | filters.Document.ALL) &
-        ~filters.COMMAND &
-        ~filters.Regex(re.compile(r'^-@')) &
-        ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team)$', re.IGNORECASE)),
-        handle_general_message
-    )
-    application.add_handler(message_handler)
+    # Remove or comment out the message_handler, as general messages are now handled by general_conv_handler
+    # application.add_handler(message_handler)
 
     # Add the error handler
     application.add_error_handler(error_handler)
