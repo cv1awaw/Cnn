@@ -16,6 +16,8 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
 )
+
+# Import your roles from the roles.py file
 from roles import (
     WRITER_IDS,
     MCQS_TEAM_IDS,
@@ -610,9 +612,115 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.warning(f"User {query.from_user.id} sent invalid role selection: {data}")
         return ConversationHandler.END
 
+# ------------------ Command Handlers ------------------
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the /start command."""
+    user = update.effective_user
+    if not user.username:
+        await update.message.reply_text(
+            "Please set a Telegram username in your profile to use specific commands like `-@username`."
+        )
+        logger.warning(f"User {user.id} has no username and cannot be targeted.")
+        return
+
+    # Store the username and user_id
+    username_lower = user.username.lower()
+    user_data_store[username_lower] = user.id
+    logger.info(f"User {user.id} with username '{username_lower}' started the bot.")
+
+    # Save to JSON file
+    save_user_data()
+
+    display_name = get_display_name(user)
+
+    await update.message.reply_text(
+        f"Hello, {display_name}! Welcome to the Team Communication Bot.\n\n"
+        "Feel free to send messages using the available commands."
+    )
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Provide help information to users with subcommands explanations."""
+    help_text = (
+        "📘 *Available Commands:*\n\n"
+        "/start - Initialize interaction with the bot.\n"
+        "/listusers - List all registered users (Tara Team only).\n"
+        "/help - Show this help message.\n"
+        "/refresh - Refresh your user information.\n"
+        "/cancel - Cancel the current operation.\n\n"
+        "*Message Sending Triggers:*\n"
+        "`-team` - Send a message to your own team and Tara Team.\n"
+        "`-t` - Send a message exclusively to the Tara Team.\n\n"
+        "*Specific Commands for Tara Team:*\n"
+        "`-@username` - Send a message to a specific user.\n"
+        "`-w` - Send a message to the Writer Team.\n"
+        "`-e` - Send a message to the Editor Team.\n"
+        "`-mcq` - Send a message to the MCQs Team.\n"
+        "`-d` - Send a message to the Digital Writers.\n"
+        "`-de` - Send a message to the Design Team.\n"
+        "`-mf` - Send a message to the Mind Map & Form Creation Team.\n"
+        "`-c` - Send a message to the Editor Team.\n\n"
+        "*Admin Commands (Tara Team only):*\n"
+        "/mute [user_id] - Mute yourself or another user.\n"
+        "/muteid <user_id> - Mute a specific user by their ID.\n"
+        "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
+        "/listmuted - List all currently muted users.\n\n"
+        "📌 *Notes:*\n"
+        "- Only Tara Team members can use the side commands and `-@username` command.\n"
+        "- Use `/cancel` to cancel any ongoing operation."
+    )
+    await update.message.reply_text(help_text, parse_mode='Markdown')
+    logger.info(f"User {update.effective_user.id} requested help.")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all stored usernames and their user IDs. Restricted to Tara Team."""
+    user_id = update.message.from_user.id
+    roles = get_user_roles(user_id)
+
+    if 'tara_team' not in roles:
+        await update.message.reply_text("You are not authorized to use this command.")
+        logger.warning(f"Unauthorized access attempt by user {user_id} for /listusers.")
+        return
+
+    if not user_data_store:
+        await update.message.reply_text("No users have interacted with the bot yet.")
+        return
+
+    user_list = "\n".join([f"@{username}: {uid}" for username, uid in user_data_store.items()])
+    await update.message.reply_text(f"**Registered Users:**\n{user_list}", parse_mode='Markdown')
+    logger.info(f"User {user_id} requested the list of users.")
+
+async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Refresh user information."""
+    user = update.effective_user
+    if not user.username:
+        await update.message.reply_text(
+            "Please set a Telegram username in your profile to refresh your information."
+        )
+        logger.warning(f"User {user.id} has no username and cannot be refreshed.")
+        return
+
+    # Store the username and user_id
+    username_lower = user.username.lower()
+    user_data_store[username_lower] = user.id
+    logger.info(f"User {user.id} with username '{username_lower}' refreshed their info.")
+
+    # Save to JSON file
+    save_user_data()
+
+    await update.message.reply_text(
+        "Your information has been refreshed successfully."
+    )
+
+# Include other command handlers like mute_command, unmute_id_command, etc.
+# (These should be the same as in your previous code.)
+
 # ------------------ Conversation Handlers ------------------
 
-# Modify the conversation handler to include media group handling
+# Include your ConversationHandler definitions here
+# Ensure you set 'per_message=True' in the ConversationHandler to address the PTBUserWarning
+
+# For example:
 general_conv_handler = ConversationHandler(
     entry_points=[
         MessageHandler(
@@ -629,9 +737,11 @@ general_conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
+    per_message=True,  # Set per_message=True to track CallbackQueryHandler for every message
 )
 
-# ... [Rest of the code remains the same, including other handlers and main() function] ...
+# ... (Include other ConversationHandlers like specific_user_conv_handler, specific_team_conv_handler, etc.)
+# Ensure you set per_message=True for them as well if they include CallbackQueryHandler in states.
 
 # ------------------ Error Handler ------------------
 
@@ -656,20 +766,14 @@ def main():
 
     # Add command handlers
     application.add_handler(CommandHandler('start', start))
-    application.add_handler(CommandHandler('listusers', list_users))
     application.add_handler(CommandHandler('help', help_command))
+    application.add_handler(CommandHandler('listusers', list_users))
     application.add_handler(CommandHandler('refresh', refresh))
-    application.add_handler(CommandHandler('mute', mute_command))
-    application.add_handler(CommandHandler('muteid', mute_id_command))
-    application.add_handler(CommandHandler('unmuteid', unmute_id_command))
-    application.add_handler(CommandHandler('listmuted', list_muted_command))
+    # Add other command handlers like mute_command, unmute_id_command, etc.
 
     # Add ConversationHandlers
-    application.add_handler(specific_user_conv_handler)
-    application.add_handler(specific_team_conv_handler)
-    application.add_handler(team_conv_handler)
-    application.add_handler(tara_conv_handler)
-    application.add_handler(general_conv_handler)  # Updated
+    application.add_handler(general_conv_handler)
+    # Add other ConversationHandlers
 
     # Add the error handler
     application.add_error_handler(error_handler)
