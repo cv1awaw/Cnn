@@ -587,8 +587,22 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         selected_role = data.split(':')[1]
         context.user_data['sender_role'] = selected_role
 
-        await query.edit_message_text("Write your message for your team and Tara Team.")
-        return TEAM_MESSAGE
+        # Retrieve the pending message
+        pending_message = context.user_data.get('pending_message')
+        if not pending_message:
+            await query.edit_message_text("An error occurred. Please try again.")
+            logger.error(f"No pending message found for user {query.from_user.id}.")
+            return ConversationHandler.END
+
+        # Remove the pending message from user_data
+        del context.user_data['pending_message']
+
+        # Set the message in the update object for processing
+        update.message = pending_message
+
+        # Proceed to handle the message
+        await query.edit_message_text("Processing your message...")
+        await team_message_handler(update, context)
     else:
         await query.edit_message_text("Invalid role selection.")
         logger.warning(f"User {query.from_user.id} sent invalid role selection: {data}")
@@ -685,8 +699,7 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
             "You have multiple roles. Please choose which role you want to use to send this message:",
             reply_markup=keyboard
         )
-        # Store pending message with a unique key
-        context.user_data['pending_message_id'] = message.message_id
+        # Store pending message
         context.user_data['pending_message'] = message
         return SELECT_ROLE
     else:
@@ -757,17 +770,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/start - Initialize interaction with the bot.\n"
         "/listusers - List all registered users (Tara Team only).\n"
         "/help - Show this help message.\n"
-        "/refresh - Refresh your user information.\n\n"
-        "*Specific Commands for Tara Team:*\n"
-        "/mute [user_id] - Mute yourself or another user.\n"
-        "/muteid <user_id> - Mute a specific user by their ID.\n"
-        "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
-        "/listmuted - List all currently muted users.\n\n"
+        "/refresh - Refresh your user information.\n"
+        "/cancel - Cancel the current operation.\n\n"
         "*Message Sending Triggers:*\n"
         "`-team` - Send a message to your own team and Tara Team.\n"
-        "`-t` - Send a message exclusively to the Tara Team.\n"
-        "`-@username` - *(Tara Team only)* Send a message to a specific user.\n\n"
-        "*Tara Team Specific Triggers:*\n"
+        "`-t` - Send a message exclusively to the Tara Team.\n\n"
+        "*Specific Commands for Tara Team:*\n"
+        "`-@username` - Send a message to a specific user.\n"
         "`-w` - Send a message to the Writer Team.\n"
         "`-e` - Send a message to the Editor Team.\n"
         "`-mcq` - Send a message to the MCQs Team.\n"
@@ -775,6 +784,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`-de` - Send a message to the Design Team.\n"
         "`-mf` - Send a message to the Mind Map & Form Creation Team.\n"
         "`-c` - Send a message to the Editor Team.\n\n"
+        "*Admin Commands (Tara Team only):*\n"
+        "/mute [user_id] - Mute yourself or another user.\n"
+        "/muteid <user_id> - Mute a specific user by their ID.\n"
+        "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
+        "/listmuted - List all currently muted users.\n\n"
         "📌 *Notes:*\n"
         "- Only Tara Team members can use the side commands and `-@username` command.\n"
         "- Use `/cancel` to cancel any ongoing operation."
@@ -1004,6 +1018,15 @@ unmute_id_handler = CommandHandler('unmuteid', unmute_id_command)
 # Add the /listmuted command handler (only for Tara Team)
 list_muted_handler = CommandHandler('listmuted', list_muted_command)
 
+# ------------------ Error Handler ------------------
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Log the error and send a message to the user if necessary."""
+    logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
+    # You can also notify the user about the error if needed
+    # if update and hasattr(update, 'message'):
+    #     await update.message.reply_text("An error occurred. Please try again later.")
+
 # ------------------ Main Function ------------------
 
 def main():
@@ -1037,10 +1060,13 @@ def main():
         (filters.TEXT | filters.Document.ALL) &
         ~filters.COMMAND &
         ~filters.Regex(re.compile(r'^-@')) &
-        ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c)$', re.IGNORECASE)),
+        ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team)$', re.IGNORECASE)),
         handle_general_message
     )
     application.add_handler(message_handler)
+
+    # Add the error handler
+    application.add_error_handler(error_handler)
 
     # Start the Bot using long polling
     logger.info("Bot started polling...")
