@@ -76,6 +76,7 @@ TRIGGER_TARGET_MAP = {
 }
 
 # Define target roles for each role
+# Adjusted to ensure that other roles can only send messages to 'tara_team' and their own role
 SENDING_ROLE_TARGETS = {
     'writer': ['writer', 'tara_team'],
     'mcqs_team': ['mcqs_team', 'tara_team'],
@@ -95,6 +96,7 @@ SPECIFIC_USER_MESSAGE = 3
 TARA_MESSAGE = 4
 CONFIRMATION = 5
 SELECT_ROLE = 6
+CANCEL = ConversationHandler.END
 
 # ------------------ User Data Storage ------------------
 
@@ -179,12 +181,14 @@ def get_confirmation_keyboard(message_id):
     return InlineKeyboardMarkup(keyboard)
 
 def get_role_selection_keyboard(roles):
-    """Return an inline keyboard for role selection."""
+    """Return an inline keyboard for role selection with a Cancel option."""
     keyboard = []
     for role in roles:
         display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
         callback_data = f"role:{role}"
         keyboard.append([InlineKeyboardButton(display_name, callback_data=callback_data)])
+    # Add a Cancel button
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_role_selection')])
     return InlineKeyboardMarkup(keyboard)
 
 async def forward_message(bot, message, target_ids, sender_role):
@@ -282,7 +286,11 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the conversation."""
-    await update.message.reply_text("Operation cancelled.")
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text("Operation cancelled.")
+    else:
+        await update.message.reply_text("Operation cancelled.")
     return ConversationHandler.END
 
 async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -347,62 +355,10 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if f'confirm_{message_id}' in context.user_data:
             del context.user_data[f'confirm_{message_id}']
 
-    elif data.startswith('confirm_media_group:'):
-        media_group_id = data.split(':')[1]
-        confirm_data = context.user_data.get(f'confirm_{media_group_id}')
-
-        if not confirm_data:
-            await query.edit_message_text("An error occurred. Please try again.")
-            logger.error(f"No confirmation data found for media_group_id {media_group_id}.")
-            return ConversationHandler.END
-
-        media_group_to_send = confirm_data['media_group_to_send']
-        target_ids = confirm_data['target_ids']
-        sender_role = confirm_data['sender_role']
-        target_roles = confirm_data.get('target_roles', [])
-
-        # Get the sender's display name
-        username_display = get_display_name(query.from_user)
-        sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
-        caption = f"🔄 *This document was sent by **{username_display} ({sender_display_name})**.*"
-
-        # Send the media group to the target users
-        for user_id in target_ids:
-            try:
-                # Update captions for each media item
-                media_group = []
-                for media in media_group_to_send:
-                    media_dict = media.to_dict()
-                    media_dict['caption'] = caption
-                    media_dict['parse_mode'] = 'Markdown'
-                    media_group.append(InputMediaDocument(**media_dict))
-
-                await context.bot.send_media_group(chat_id=user_id, media=media_group)
-                logger.info(f"Sent media group {media_group_id} to {user_id}")
-            except Exception as e:
-                logger.error(f"Failed to send media group to {user_id}: {e}")
-
-        # Prepare display names for confirmation
-        recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles if r != 'specific_user']
-
-        confirmation_text = (
-            f"✅ *Your media group has been sent from **{sender_display_name}** "
-            f"to **{', '.join(recipient_display_names)}**.*"
-        )
-
-        await query.edit_message_text(confirmation_text, parse_mode='Markdown')
-        logger.info(f"User {query.from_user.id} confirmed and sent media group {media_group_id}.")
-
-        # Clean up the stored data
-        del context.user_data[f'confirm_{media_group_id}']
-
-    elif data.startswith('cancel_media_group:'):
-        media_group_id = data.split(':')[1]
+    elif data == 'cancel_role_selection':
         await query.edit_message_text("Operation cancelled.")
-        logger.info(f"User {query.from_user.id} cancelled the message sending for media group {media_group_id}.")
-
-        if f'confirm_{media_group_id}' in context.user_data:
-            del context.user_data[f'confirm_{media_group_id}']
+        logger.info(f"User {query.from_user.id} cancelled role selection.")
+        return ConversationHandler.END
 
     else:
         await query.edit_message_text("Invalid choice.")
@@ -649,34 +605,28 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         selected_role = data.split(':')[1]
         context.user_data['sender_role'] = selected_role
 
-        # Check if there is a pending media group
-        pending_media_group = context.user_data.get('pending_media_group')
-        if pending_media_group:
-            del context.user_data['pending_media_group']
+        # Retrieve the pending message
+        pending_message = context.user_data.get('pending_message')
+        if not pending_message:
+            await query.edit_message_text("An error occurred. Please try again.")
+            logger.error(f"No pending message found for user {query.from_user.id}.")
+            return ConversationHandler.END
 
-            await query.edit_message_text("Processing your media group...")
-            chat_id = pending_media_group[0].chat_id
-            media_group_id = pending_media_group[0].media_group_id
+        # Remove the pending message from user_data
+        del context.user_data['pending_message']
 
-            await team_media_group_handler(context, query.from_user.id, pending_media_group, chat_id, media_group_id)
-            return
-        else:
-            # Retrieve the pending message
-            pending_message = context.user_data.get('pending_message')
-            if not pending_message:
-                await query.edit_message_text("An error occurred. Please try again.")
-                logger.error(f"No pending message found for user {query.from_user.id}.")
-                return ConversationHandler.END
+        # Proceed to handle the message
+        await query.edit_message_text("Processing your message...")
+        # Capture the state returned by team_message_handler
+        state = await team_message_handler(update, context, message=pending_message)
+        # Return the state to continue the conversation
+        return state
 
-            # Remove the pending message from user_data
-            del context.user_data['pending_message']
+    elif data == 'cancel_role_selection':
+        await query.edit_message_text("Operation cancelled.")
+        logger.info(f"User {query.from_user.id} cancelled role selection.")
+        return ConversationHandler.END
 
-            # Proceed to handle the message
-            await query.edit_message_text("Processing your message...")
-            # Capture the state returned by team_message_handler
-            state = await team_message_handler(update, context, message=pending_message)
-            # Return the state to continue the conversation
-            return state
     else:
         await query.edit_message_text("Invalid role selection.")
         logger.warning(f"User {query.from_user.id} sent invalid role selection: {data}")
@@ -765,187 +715,35 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
 
     logger.info(f"Received message from user {user_id} with roles '{roles}'")
 
-    media_group_id = message.media_group_id
-
-    if media_group_id:
-        # Message is part of a media group (album)
-        # Store the message in context.user_data under the media_group_id
-        media_group = context.user_data.get(f'media_group_{media_group_id}', [])
-        media_group.append(message)
-        context.user_data[f'media_group_{media_group_id}'] = media_group
-
-        # Set a timer to process the media group after a short delay
-        if 'media_group_jobs' not in context.user_data:
-            context.user_data['media_group_jobs'] = {}
-        else:
-            job = context.user_data['media_group_jobs'].get(media_group_id)
-            if job:
-                job.schedule_removal()
-
-        job = context.job_queue.run_once(
-            process_media_group,
-            when=1.0,  # Delay in seconds
-            data={
-                'user_id': user_id,
-                'media_group_id': media_group_id,
-                'chat_id': message.chat_id,
-            },
-            name=f'media_group_{media_group_id}'
-        )
-        context.user_data['media_group_jobs'][media_group_id] = job
-
-        return  # Do not proceed further now
-
-    else:
-        # Determine target roles based on sender's roles
-        if len(roles) > 1:
-            # Present role selection keyboard
-            keyboard = get_role_selection_keyboard(roles)
-            await message.reply_text(
-                "You have multiple roles. Please choose which role you want to use to send this message:",
-                reply_markup=keyboard
-            )
-            # Store pending message
-            context.user_data['pending_message'] = message
-            return SELECT_ROLE
-        else:
-            # Single role, proceed to send message
-            selected_role = roles[0]
-            context.user_data['sender_role'] = selected_role
-
-            # Handle PDF documents and text messages
-            if message.document and message.document.mime_type == 'application/pdf':
-                # Proceed to confirmation
-                await team_message_handler(update, context)
-            elif message.text:
-                # Proceed to confirmation
-                await team_message_handler(update, context)
-            else:
-                await message.reply_text("Please send PDF documents or text messages only.")
-                logger.warning(f"User {user_id} sent an unsupported message type.")
-                return ConversationHandler.END
-
-            return ConversationHandler.END
-
-async def process_media_group(context: ContextTypes.DEFAULT_TYPE):
-    """Process the collected media group messages after the delay."""
-    job_data = context.job.data
-    user_id = job_data['user_id']
-    media_group_id = job_data['media_group_id']
-    chat_id = job_data['chat_id']
-
-    # Get the messages from context.user_data
-    media_group = context.user_data.get(f'media_group_{media_group_id}', [])
-
-    if not media_group:
-        logger.error(f"No messages found for media_group_id {media_group_id}")
-        return
-
-    # Remove the stored media group and job
-    del context.user_data[f'media_group_{media_group_id}']
-    if 'media_group_jobs' in context.user_data:
-        context.user_data['media_group_jobs'].pop(media_group_id, None)
-
-    roles = get_user_roles(user_id)
-
-    if not roles:
-        await context.bot.send_message(chat_id=chat_id, text="You don't have a role assigned to use this bot.")
-        logger.warning(f"Unauthorized access attempt by user {user_id}")
-        return
-
-    logger.info(f"Processing media group {media_group_id} from user {user_id} with roles '{roles}'")
-
+    # Determine target roles based on sender's roles
     if len(roles) > 1:
         # Present role selection keyboard
         keyboard = get_role_selection_keyboard(roles)
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="You have multiple roles. Please choose which role you want to use to send this message:",
+        await message.reply_text(
+            "You have multiple roles. Please choose which role you want to use to send this message:",
             reply_markup=keyboard
         )
-        # Store pending media group
-        context.user_data['pending_media_group'] = media_group
-        # Set the conversation state
-        context.user_data['conversation_state'] = SELECT_ROLE
-        return
+        # Store pending message
+        context.user_data['pending_message'] = message
+        return SELECT_ROLE
     else:
+        # Single role, proceed to send message
         selected_role = roles[0]
         context.user_data['sender_role'] = selected_role
 
-        # Proceed to confirmation
-        await team_media_group_handler(context, user_id, media_group, chat_id, media_group_id)
-        return
-
-async def team_media_group_handler(context, user_id, media_group, chat_id, media_group_id):
-    selected_role = context.user_data.get('sender_role')
-
-    if not selected_role:
-        await context.bot.send_message(chat_id=chat_id, text="An error occurred. Please try again.")
-        logger.error(f"No sender role found in user_data for user {user_id}.")
-        return
-
-    target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
-    target_ids = set()
-
-    for target_role in target_roles:
-        target_ids.update(ROLE_MAP.get(target_role, []))
-
-    # Exclude the sender's user ID from all forwards
-    target_ids.discard(user_id)
-
-    if not target_ids:
-        await context.bot.send_message(chat_id=chat_id, text="No recipients found to send your message.")
-        logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
-        return
-
-    # Prepare the media group to send
-    media_group_to_send = []
-    for msg in media_group:
-        if msg.document and msg.document.mime_type == 'application/pdf':
-            media_group_to_send.append(InputMediaDocument(
-                media=msg.document.file_id,
-                caption=msg.caption or '',  # Use the caption if any
-                parse_mode='Markdown'
-            ))
+        # Handle PDF documents and text messages
+        if message.document and message.document.mime_type == 'application/pdf':
+            # Proceed to confirmation
+            await team_message_handler(update, context)
+        elif message.text:
+            # Proceed to confirmation
+            await team_message_handler(update, context)
         else:
-            await context.bot.send_message(chat_id=chat_id, text="Please send only PDF documents in the media group.")
-            logger.warning(f"User {user_id} sent an unsupported media type in media group.")
-            return
+            await message.reply_text("Please send PDF documents or text messages only.")
+            logger.warning(f"User {user_id} sent an unsupported message type.")
+            return ConversationHandler.END
 
-    # Store the media group and targets for confirmation
-    context.user_data['media_group_to_send'] = media_group_to_send
-    context.user_data['target_ids'] = list(target_ids)
-    context.user_data['target_roles'] = target_roles
-
-    # Send confirmation
-    content_description = f"Media group with {len(media_group_to_send)} PDFs."
-
-    confirmation_text = (
-        f"📩 *You are about to send the following to **{', '.join([ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles])}**:*\n\n"
-        f"{content_description}\n\n"
-        "Do you want to send this?"
-    )
-    reply_markup = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Confirm", callback_data=f'confirm_media_group:{media_group_id}'),
-            InlineKeyboardButton("❌ Cancel", callback_data=f'cancel_media_group:{media_group_id}'),
-        ]
-    ])
-
-    confirmation_message = await context.bot.send_message(
-        chat_id=chat_id,
-        text=confirmation_text,
-        parse_mode='Markdown',
-        reply_markup=reply_markup
-    )
-
-    # Store confirmation data
-    context.user_data[f'confirm_{media_group_id}'] = {
-        'media_group_to_send': media_group_to_send,
-        'target_ids': list(target_ids),
-        'sender_role': selected_role,
-        'target_roles': target_roles
-    }
+        return ConversationHandler.END
 
 # ------------------ Command Handlers ------------------
 
@@ -1194,7 +992,7 @@ specific_user_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', re.IGNORECASE)), specific_user_trigger)],
     states={
         SPECIFIC_USER_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_media_group:|cancel_media_group:)')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -1204,7 +1002,7 @@ specific_team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|c)$', re.IGNORECASE)), specific_team_trigger)],
     states={
         SPECIFIC_TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_media_group:|cancel_media_group:)')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -1213,9 +1011,9 @@ specific_team_conv_handler = ConversationHandler(
 team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-team$', re.IGNORECASE)), team_trigger)],
     states={
-        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^role:')],
+        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^(role:|cancel_role_selection$)')],
         TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_media_group:|cancel_media_group:)')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -1225,7 +1023,7 @@ tara_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-t$', re.IGNORECASE)), tara_trigger)],
     states={
         TARA_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_media_group:|cancel_media_group:)')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -1240,8 +1038,8 @@ general_conv_handler = ConversationHandler(
         handle_general_message
     )],
     states={
-        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^role:')],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_media_group:|cancel_media_group:)')],
+        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^(role:|cancel_role_selection$)')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:)')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
