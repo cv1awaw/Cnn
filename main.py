@@ -266,7 +266,7 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
+    confirmation_message = await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
 
     # Store necessary data in context.user_data with a unique key
     context.user_data[f'confirm_{message.message_id}'] = {
@@ -289,15 +289,27 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     data = query.data
 
-    if data.startswith('confirm:'):
-        message_id = int(data.split(':')[1])
-        confirm_data = context.user_data.get(f'confirm_{message_id}')
-
-        if not confirm_data:
-            await query.edit_message_text("An error occurred. Please try again.")
-            logger.error(f"No confirmation data found for message ID {message_id}.")
+    # Retrieve the original message ID from the callback data
+    if data.startswith('confirm:') or data.startswith('cancel:'):
+        try:
+            original_message_id = int(data.split(':')[1])
+        except (IndexError, ValueError):
+            await query.edit_message_text("Invalid confirmation data. Please try again.")
+            logger.error("Failed to parse original_message_id from callback data.")
             return ConversationHandler.END
+    else:
+        await query.edit_message_text("Invalid confirmation data. Please try again.")
+        logger.error("Invalid confirmation data format.")
+        return ConversationHandler.END
 
+    confirm_data = context.user_data.get(f'confirm_{original_message_id}')
+
+    if not confirm_data:
+        await query.edit_message_text("An error occurred. Please try again.")
+        logger.error(f"No confirmation data found for message ID {original_message_id}.")
+        return ConversationHandler.END
+
+    if data.startswith('confirm:'):
         message_to_send = confirm_data['message']
         target_ids = confirm_data['target_ids']
         sender_role = confirm_data['sender_role']
@@ -310,7 +322,14 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
 
         if 'specific_user' in target_roles:
-            recipient_display_names = [get_display_name(await context.bot.get_chat(tid)) for tid in target_ids]
+            recipient_display_names = []
+            for tid in target_ids:
+                try:
+                    target_user = await context.bot.get_chat(tid)
+                    recipient_display_names.append(get_display_name(target_user))
+                except Exception as e:
+                    recipient_display_names.append(f"User ID {tid}")
+                    logger.error(f"Failed to get chat for user ID {tid}: {e}")
         else:
             recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles if r != 'specific_user']
 
@@ -334,16 +353,15 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.info(f"User {query.from_user.id} confirmed and sent the message {message_to_send.message_id}.")
 
         # Clean up the stored data
-        del context.user_data[f'confirm_{message_id}']
+        del context.user_data[f'confirm_{original_message_id}']
 
     elif data.startswith('cancel:'):
-        message_id = int(data.split(':')[1])
         await query.edit_message_text("Operation cancelled.")
-        logger.info(f"User {query.from_user.id} cancelled the message sending for message ID {message_id}.")
+        logger.info(f"User {query.from_user.id} cancelled the message sending for message ID {original_message_id}.")
 
         # Clean up the stored data
-        if f'confirm_{message_id}' in context.user_data:
-            del context.user_data[f'confirm_{message_id}']
+        if f'confirm_{original_message_id}' in context.user_data:
+            del context.user_data[f'confirm_{original_message_id}']
 
     else:
         await query.edit_message_text("Invalid choice.")
@@ -729,7 +747,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user.username:
         await update.message.reply_text(
-            "Please set a Telegram username in your profile to use specific commands like `-@username`."
+            "Please set a Telegram username in your profile to use specific commands like `-@username`.",
+            parse_mode='Markdown'
         )
         logger.warning(f"User {user.id} has no username and cannot be targeted.")
         return
@@ -805,7 +824,8 @@ async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user.username:
         await update.message.reply_text(
-            "Please set a Telegram username in your profile to refresh your information."
+            "Please set a Telegram username in your profile to refresh your information.",
+            parse_mode='Markdown'
         )
         logger.warning(f"User {user.id} has no username and cannot be refreshed.")
         return
@@ -1060,5 +1080,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
