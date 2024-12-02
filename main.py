@@ -36,15 +36,16 @@ from roles import (
 
 # ------------------ Setup Logging ------------------
 
+# Enable detailed logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.DEBUG  # Set to DEBUG for detailed logs
+    level=logging.DEBUG  # Set to DEBUG for comprehensive logs
 )
 logger = logging.getLogger(__name__)
 
 # ------------------ Define Roles ------------------
 
-# Define roles and their corresponding IDs
+# Define roles and their corresponding user IDs
 ROLE_MAP = {
     'writer': WRITER_IDS,
     'mcqs_team': MCQS_TEAM_IDS,
@@ -79,8 +80,7 @@ TRIGGER_TARGET_MAP = {
     '-c': ['checker_team'],          # Newly added trigger for Checker Team
 }
 
-# Define target roles for each role
-# Adjusted to ensure that other roles can only send messages to 'tara_team' and their own role
+# Define target roles for each sending role
 SENDING_ROLE_TARGETS = {
     'writer': ['writer', 'tara_team'],
     'mcqs_team': ['mcqs_team', 'tara_team'],
@@ -94,12 +94,8 @@ SENDING_ROLE_TARGETS = {
 
 # ------------------ Define Conversation States ------------------
 
-TEAM_MESSAGE = 1
-SPECIFIC_TEAM_MESSAGE = 2
-SPECIFIC_USER_MESSAGE = 3
-TARA_MESSAGE = 4
-CONFIRMATION = 5
-SELECT_ROLE = 6
+CONFIRMATION = 1
+SELECT_ROLE = 2
 
 # ------------------ User Data Storage ------------------
 
@@ -111,7 +107,6 @@ if USER_DATA_FILE.exists():
     with open(USER_DATA_FILE, 'r') as f:
         try:
             user_data_store = json.load(f)
-            # Convert keys to lowercase to maintain consistency
             user_data_store = {k.lower(): v for k, v in user_data_store.items()}
             logger.info("Loaded existing user data from user_data.json.")
         except json.JSONDecodeError:
@@ -139,7 +134,7 @@ def get_user_roles(user_id):
 
 # ------------------ Mute Functionality ------------------
 
-# Mute data storage: list of muted user IDs
+# Mute data storage: set of muted user IDs
 MUTED_USERS_FILE = Path('muted_users.json')
 
 # Load existing muted users if the file exists
@@ -426,44 +421,10 @@ async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TY
 
         await update.message.reply_text(f"Write your message for user `@{target_username}`.", parse_mode='Markdown')
         logger.info(f"User {user_id} is sending a message to user @{target_username} (ID: {target_user_id}).")
-        return SPECIFIC_USER_MESSAGE
-
-    except Exception as e:
-        logger.error(f"Error in specific_user_trigger: {e}")
-        await update.message.reply_text("An error occurred. Please try again later.")
-        return ConversationHandler.END
-
-async def specific_user_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the message intended for a specific user and ask for confirmation."""
-    try:
-        message = update.message
-        user_id = message.from_user.id
-
-        target_user_id = context.bot_data.get('target_user_id')
-        target_username = context.bot_data.get('target_username')
-
-        if not target_user_id:
-            await message.reply_text("An error occurred. Please try again.")
-            logger.error(f"No target user ID found in bot_data for user {user_id}.")
-            return ConversationHandler.END
-
-        # Ensure only the specific user is targeted
-        target_ids = [target_user_id]
-        target_roles = ['specific_user']
-        sender_role = context.bot_data.get('sender_role', 'tara_team')  # Tara Team is sending the message
-
-        # Store the message for confirmation
-        messages_to_send = [message]
-
-        # Send confirmation using UUID
-        await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=['specific_user'])
-
-        logger.info(f"User {user_id} initiated sending a message to user @{target_username} (ID: {target_user_id}).")
-
         return CONFIRMATION
 
     except Exception as e:
-        logger.error(f"Error in specific_user_message_handler: {e}")
+        logger.error(f"Error in specific_user_trigger: {e}")
         await update.message.reply_text("An error occurred. Please try again later.")
         return ConversationHandler.END
 
@@ -493,48 +454,10 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
 
         await update.message.reply_text("Write your message for your team.")
         logger.info(f"User {user_id} is sending a message to roles {target_roles}.")
-        return SPECIFIC_TEAM_MESSAGE
-
-    except Exception as e:
-        logger.error(f"Error in specific_team_trigger: {e}")
-        await update.message.reply_text("An error occurred. Please try again later.")
-        return ConversationHandler.END
-
-async def specific_team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the team message after the specific trigger and ask for confirmation."""
-    try:
-        message = update.message
-        user_id = message.from_user.id
-
-        target_roles = context.bot_data.get('specific_target_roles', [])
-        target_ids = set()
-
-        for target_role in target_roles:
-            target_ids.update(ROLE_MAP.get(target_role, []))
-
-        # Exclude the sender's user ID from all forwards
-        target_ids.discard(user_id)
-
-        if not target_ids:
-            await message.reply_text("No recipients found to send your message.")
-            logger.warning(f"No recipients found for user {user_id}.")
-            return ConversationHandler.END
-
-        # Store the message and targets for confirmation
-        messages_to_send = [message]
-        target_ids = list(target_ids)
-        target_roles = target_roles
-        sender_role = context.bot_data.get('sender_role', 'tara_team')
-
-        # Send confirmation using UUID
-        await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
-
-        logger.info(f"User {user_id} initiated sending a message to roles {target_roles}.")
-
         return CONFIRMATION
 
     except Exception as e:
-        logger.error(f"Error in specific_team_message_handler: {e}")
+        logger.error(f"Error in specific_team_trigger: {e}")
         await update.message.reply_text("An error occurred. Please try again later.")
         return ConversationHandler.END
 
@@ -569,121 +492,245 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text("Write your message for your team and Tara Team.")
             logger.info(f"User {user_id} with role '{selected_role}' is sending a message to their team and Tara Team.")
-            return TEAM_MESSAGE
+            return CONFIRMATION
 
     except Exception as e:
         logger.error(f"Error in team_trigger: {e}")
         await update.message.reply_text("An error occurred. Please try again later.")
         return ConversationHandler.END
 
-async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the team message after the general trigger and ask for confirmation."""
+async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle incoming messages and forward them based on user roles."""
     try:
         message = update.message
+        if not message:
+            return ConversationHandler.END  # Ignore non-message updates
+
         user_id = message.from_user.id
-        sender_role = context.bot_data.get('sender_role')
+        username = message.from_user.username
 
-        if not sender_role:
-            await message.reply_text("An error occurred. Please try again.")
-            logger.error(f"No sender role found in bot_data for user {user_id}.")
+        # Check if the user is muted
+        if user_id in muted_users:
+            await message.reply_text("You have been muted and cannot send messages through this bot.")
+            logger.info(f"Muted user {user_id} attempted to send a message.")
             return ConversationHandler.END
 
-        target_roles = SENDING_ROLE_TARGETS.get(sender_role, [])
-        target_ids = set()
-
-        for role in target_roles:
-            target_ids.update(ROLE_MAP.get(role, []))
-
-        # Exclude the sender's user ID from all forwards
-        target_ids.discard(user_id)
-
-        if not target_ids:
-            await message.reply_text("No recipients found to send your message.")
-            logger.warning(f"No recipients found for user {user_id} with role '{sender_role}'.")
-            return ConversationHandler.END
-
-        # Store the message and targets for confirmation
-        messages_to_send = [message]
-        target_ids = list(target_ids)
-        target_roles = target_roles
-        sender_role = sender_role
-
-        # Handle PDF documents and text messages
-        if message.document and message.document.mime_type == 'application/pdf':
-            # Send confirmation using UUID
-            await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
-            logger.info(f"User {user_id} is sending PDF documents.")
-        elif message.text:
-            # Send confirmation using UUID
-            await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
-            logger.info(f"User {user_id} is sending text messages.")
+        # Store the username and user_id if username exists
+        if username:
+            username_lower = username.lower()
+            previous_id = user_data_store.get(username_lower)
+            if previous_id != user_id:
+                # Update if the user_id has changed
+                user_data_store[username_lower] = user_id
+                logger.info(f"Stored/Updated username '{username_lower}' for user ID {user_id}.")
+                save_user_data()
         else:
-            await message.reply_text("Please send PDF documents or text messages only.")
-            logger.warning(f"User {user_id} sent an unsupported message type.")
+            logger.info(f"User {user_id} has no username and cannot be targeted.")
+
+        roles = get_user_roles(user_id)
+
+        if not roles:
+            await message.reply_text("You don't have a role assigned to use this bot.")
+            logger.warning(f"Unauthorized access attempt by user {user_id}")
             return ConversationHandler.END
 
-        return CONFIRMATION
+        logger.info(f"Received message from user {user_id} with roles '{roles}'")
+
+        # Determine if the message is part of a media group
+        media_group_id = message.media_group_id
+
+        if media_group_id:
+            # Handle media group (album)
+            application = context.application
+            pending_media_groups = application.bot_data.setdefault('pending_media_groups', defaultdict(list))
+
+            pending_media_groups[media_group_id].append(message)
+            logger.debug(f"Added message {message.message_id} to media group {media_group_id}.")
+
+            if len(pending_media_groups[media_group_id]) == 1:
+                # First message in the media group, start a task to process after a short delay
+                asyncio.create_task(process_media_group(media_group_id, context))
+
+            # Do not proceed further until the media group is processed
+            return ConversationHandler.END
+        else:
+            # Handle single message
+            if len(roles) > 1:
+                # Present role selection keyboard
+                keyboard = get_role_selection_keyboard(roles)
+                await message.reply_text(
+                    "You have multiple roles. Please choose which role you want to use to send this message:",
+                    reply_markup=keyboard
+                )
+                # Store pending messages
+                context.bot_data['pending_messages'] = [message]
+                logger.info(f"User {user_id} has multiple roles and is prompted to select one.")
+                return SELECT_ROLE
+            else:
+                # Single role, proceed to send message
+                selected_role = roles[0]
+                context.bot_data['sender_role'] = selected_role
+
+                target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
+                target_ids = set()
+                for role in target_roles:
+                    target_ids.update(ROLE_MAP.get(role, []))
+                target_ids.discard(user_id)
+
+                if not target_ids:
+                    await message.reply_text("No recipients found to send your message.")
+                    logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
+                    return ConversationHandler.END
+
+                # Store the message and targets for confirmation
+                messages_to_send = [message]
+                target_ids = list(target_ids)
+                target_roles = target_roles
+                sender_role = selected_role
+
+                # Send confirmation using UUID
+                await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
+
+                logger.info(f"User {user_id} is sending a message to roles {target_roles}.")
+
+                return CONFIRMATION
 
     except Exception as e:
-        logger.error(f"Error in team_message_handler: {e}")
+        logger.error(f"Error in handle_general_message: {e}")
         await update.message.reply_text("An error occurred. Please try again later.")
         return ConversationHandler.END
 
-async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the role selection from the user."""
+async def process_media_group(media_group_id, context):
+    """Process all messages in a media group after a short delay."""
     try:
-        query = update.callback_query
-        await query.answer()
-        data = query.data
+        await asyncio.sleep(2)  # Wait to collect all messages in the media group
 
-        logger.debug(f"Received role selection callback data: {data}")
+        application = context.application
+        pending_media_groups = application.bot_data.get('pending_media_groups', {})
+        messages = pending_media_groups.pop(media_group_id, [])
 
-        if data.startswith('role:'):
-            selected_role = data.split(':', 1)[1]
+        if not messages:
+            logger.error(f"No messages found for media group {media_group_id}.")
+            return
+
+        user_id = messages[0].from_user.id
+        roles = get_user_roles(user_id)
+
+        if not roles:
+            await messages[0].reply_text("You don't have a role assigned to use this bot.")
+            logger.warning(f"Unauthorized access attempt by user {user_id}")
+            return
+
+        # Determine target roles based on sender's roles
+        if len(roles) > 1:
+            # Present role selection keyboard
+            keyboard = get_role_selection_keyboard(roles)
+            await messages[0].reply_text(
+                "You have multiple roles. Please choose which role you want to use to send this message:",
+                reply_markup=keyboard
+            )
+            # Store pending messages
+            application.bot_data['pending_messages'] = messages
+            logger.info(f"User {user_id} with multiple roles is prompted to select one for media group {media_group_id}.")
+            return SELECT_ROLE
+        else:
+            # Single role, proceed to send message
+            selected_role = roles[0]
             context.bot_data['sender_role'] = selected_role
 
-            # Retrieve the pending messages
-            pending_messages = context.bot_data.get('pending_messages', [])
-
-            if not pending_messages:
-                await query.edit_message_text("No pending messages found. Please try again.")
-                logger.error(f"No pending messages found for user {query.from_user.id}.")
-                return ConversationHandler.END
-
-            # Remove the pending messages from bot_data
-            del context.bot_data['pending_messages']
-
-            # Determine target_ids and target_roles based on selected_role
             target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
             target_ids = set()
             for role in target_roles:
                 target_ids.update(ROLE_MAP.get(role, []))
-            target_ids.discard(query.from_user.id)
+            target_ids.discard(user_id)
 
             if not target_ids:
-                await query.edit_message_text("No recipients found to send your message.")
-                logger.warning(f"No recipients found for user {query.from_user.id} with role '{selected_role}'.")
-                return ConversationHandler.END
+                await messages[0].reply_text("No recipients found to send your message.")
+                logger.warning(f"No recipients found for user {user_id} with role '{selected_role}' in media group {media_group_id}.")
+                return
 
             # Send confirmation using UUID
-            await send_confirmation(pending_messages, context, selected_role, list(target_ids), target_roles=target_roles)
+            await send_confirmation(messages, context, selected_role, list(target_ids), target_roles=target_roles)
+            logger.info(f"User {user_id} is sending media group {media_group_id} with role '{selected_role}'.")
 
-            await query.edit_message_text("Processing your message...")
-            logger.info(f"User {query.from_user.id} selected role '{selected_role}' and is prompted for confirmation.")
             return CONFIRMATION
 
-        elif data == 'cancel_role_selection':
-            await query.edit_message_text("Operation cancelled.")
-            logger.info(f"User {query.from_user.id} cancelled role selection.")
-            return ConversationHandler.END
-        else:
-            await query.edit_message_text("Invalid role selection.")
-            logger.warning(f"User {query.from_user.id} sent invalid role selection: {data}")
+    except Exception as e:
+        logger.error(f"Error in process_media_group: {e}")
+        # It's not possible to send a message to a specific update here, so we skip user notification
+        return
+
+async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger function when a Tara team member sends a specific user command."""
+    try:
+        user_id = update.message.from_user.id
+        roles = get_user_roles(user_id)
+
+        if 'tara_team' not in roles:
+            await update.message.reply_text("You are not authorized to use this command.")
+            logger.warning(f"Unauthorized access attempt by user {user_id} for specific user triggers.")
             return ConversationHandler.END
 
+        # Extract username from the command using regex
+        match = re.match(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', update.message.text, re.IGNORECASE)
+        if not match:
+            await update.message.reply_text("Invalid format. Please use `-@username` to target a user.", parse_mode='Markdown')
+            logger.warning(f"Invalid user command format from user {user_id}.")
+            return ConversationHandler.END
+
+        target_username = match.group(1).lower()
+        target_user_id = user_data_store.get(target_username)
+
+        if not target_user_id:
+            await update.message.reply_text(f"User `@{target_username}` not found.", parse_mode='Markdown')
+            logger.warning(f"Tara Team member {user_id} attempted to target non-existent user @{target_username}.")
+            return ConversationHandler.END
+
+        # Store target user ID and other necessary data in bot_data
+        context.bot_data['target_user_id'] = target_user_id
+        context.bot_data['target_username'] = target_username
+        context.bot_data['sender_role'] = 'tara_team'  # Tara Team is sending the message
+
+        await update.message.reply_text(f"Write your message for user `@{target_username}`.", parse_mode='Markdown')
+        logger.info(f"User {user_id} is sending a message to user @{target_username} (ID: {target_user_id}).")
+        return CONFIRMATION
+
     except Exception as e:
-        logger.error(f"Error in select_role_handler: {e}")
-        await query.edit_message_text("An error occurred. Please try again later.")
+        logger.error(f"Error in specific_user_trigger: {e}")
+        await update.message.reply_text("An error occurred. Please try again later.")
+        return ConversationHandler.END
+
+async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger function when a Tara team member sends a specific team command."""
+    try:
+        user_id = update.message.from_user.id
+        roles = get_user_roles(user_id)
+
+        if 'tara_team' not in roles:
+            await update.message.reply_text("You are not authorized to use this command.")
+            logger.warning(f"Unauthorized access attempt by user {user_id} for specific team triggers.")
+            return ConversationHandler.END
+
+        message_text = update.message.text.strip()
+        message = message_text.lower()
+        target_roles = TRIGGER_TARGET_MAP.get(message)
+
+        if not target_roles:
+            await update.message.reply_text("Invalid trigger. Please try again.")
+            logger.warning(f"Invalid trigger '{message}' from user {user_id}.")
+            return ConversationHandler.END
+
+        # Store target roles in bot_data
+        context.bot_data['specific_target_roles'] = target_roles
+        context.bot_data['sender_role'] = 'tara_team'  # Tara Team is sending the message
+
+        await update.message.reply_text("Write your message for your team.")
+        logger.info(f"User {user_id} is sending a message to roles {target_roles}.")
+        return CONFIRMATION
+
+    except Exception as e:
+        logger.error(f"Error in specific_team_trigger: {e}")
+        await update.message.reply_text("An error occurred. Please try again later.")
         return ConversationHandler.END
 
 async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -702,7 +749,7 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text("Write your message for the Tara Team.")
         logger.info(f"User {user_id} with role '{roles[0]}' is sending a message to Tara Team.")
-        return TARA_MESSAGE
+        return CONFIRMATION
 
     except Exception as e:
         logger.error(f"Error in tara_trigger: {e}")
@@ -822,31 +869,27 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
                 selected_role = roles[0]
                 context.bot_data['sender_role'] = selected_role
 
-                # Handle PDF documents and text messages
-                if message.document and message.document.mime_type == 'application/pdf':
-                    # Send confirmation using UUID
-                    await send_confirmation(
-                        [message],
-                        context,
-                        selected_role,
-                        list(ROLE_MAP.get(selected_role, [])),
-                        target_roles=SENDING_ROLE_TARGETS.get(selected_role, [])
-                    )
-                    logger.info(f"User {user_id} is sending PDF documents.")
-                elif message.text:
-                    # Send confirmation using UUID
-                    await send_confirmation(
-                        [message],
-                        context,
-                        selected_role,
-                        list(ROLE_MAP.get(selected_role, [])),
-                        target_roles=SENDING_ROLE_TARGETS.get(selected_role, [])
-                    )
-                    logger.info(f"User {user_id} is sending text messages.")
-                else:
-                    await message.reply_text("Please send PDF documents or text messages only.")
-                    logger.warning(f"User {user_id} sent an unsupported message type.")
+                target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
+                target_ids = set()
+                for role in target_roles:
+                    target_ids.update(ROLE_MAP.get(role, []))
+                target_ids.discard(user_id)
+
+                if not target_ids:
+                    await message.reply_text("No recipients found to send your message.")
+                    logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
                     return ConversationHandler.END
+
+                # Store the message and targets for confirmation
+                messages_to_send = [message]
+                target_ids = list(target_ids)
+                target_roles = target_roles
+                sender_role = selected_role
+
+                # Send confirmation using UUID
+                await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
+
+                logger.info(f"User {user_id} is sending a message to roles {target_roles}.")
 
                 return CONFIRMATION
 
@@ -855,64 +898,65 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("An error occurred. Please try again later.")
         return ConversationHandler.END
 
-async def process_media_group(media_group_id, context):
-    """Process all messages in a media group after a short delay."""
-    try:
-        await asyncio.sleep(1)  # Wait to collect all messages in the media group
+# ------------------ Conversation Handlers ------------------
 
-        application = context.application
-        pending_media_groups = application.bot_data.get('pending_media_groups', {})
-        messages = pending_media_groups.pop(media_group_id, [])
+# Define the ConversationHandler for specific user commands
+specific_user_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(re.compile(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', re.IGNORECASE)), specific_user_trigger)],
+    states={
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+    allow_reentry=False,
+)
 
-        if not messages:
-            logger.error(f"No messages found for media group {media_group_id}.")
-            return
+# Define the ConversationHandler for specific team commands
+specific_team_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|c)$', re.IGNORECASE)), specific_team_trigger)],
+    states={
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+    allow_reentry=False,
+)
 
-        user_id = messages[0].from_user.id
-        roles = get_user_roles(user_id)
+# Define the ConversationHandler for general team messages (-team)
+team_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(re.compile(r'^-team$', re.IGNORECASE)), team_trigger)],
+    states={
+        SELECT_ROLE: [CallbackQueryHandler(confirmation_handler, pattern='^role:.*$|^cancel_role_selection$')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+    allow_reentry=False,
+)
 
-        if not roles:
-            await messages[0].reply_text("You don't have a role assigned to use this bot.")
-            logger.warning(f"Unauthorized access attempt by user {user_id}")
-            return
+# Define the ConversationHandler for Tara team messages (-t)
+tara_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex(re.compile(r'^-t$', re.IGNORECASE)), tara_trigger)],
+    states={
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+    allow_reentry=False,
+)
 
-        # Determine target roles based on sender's roles
-        if len(roles) > 1:
-            # Present role selection keyboard
-            keyboard = get_role_selection_keyboard(roles)
-            await messages[0].reply_text(
-                "You have multiple roles. Please choose which role you want to use to send this message:",
-                reply_markup=keyboard
-            )
-            # Store pending messages
-            application.bot_data['pending_messages'] = messages
-            logger.info(f"User {user_id} with multiple roles is prompted to select one for media group {media_group_id}.")
-            return SELECT_ROLE
-        else:
-            # Single role, proceed to send message
-            selected_role = roles[0]
-            context.bot_data['sender_role'] = selected_role
-
-            target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
-            target_ids = set()
-            for role in target_roles:
-                target_ids.update(ROLE_MAP.get(role, []))
-            target_ids.discard(user_id)
-
-            if not target_ids:
-                await messages[0].reply_text("No recipients found to send your message.")
-                logger.warning(f"No recipients found for user {user_id} with role '{selected_role}' in media group {media_group_id}.")
-                return
-
-            # Send confirmation using UUID
-            await send_confirmation(messages, context, selected_role, list(target_ids), target_roles=target_roles)
-            logger.info(f"User {user_id} is sending media group {media_group_id} with role '{selected_role}'.")
-
-            return CONFIRMATION
-
-    except Exception as e:
-        logger.error(f"Error in process_media_group: {e}")
-        await update.message.reply_text("An error occurred while processing your media group. Please try again later.")
+# Define the ConversationHandler for general messages
+general_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(
+        (filters.TEXT | filters.Document.ALL) &
+        ~filters.COMMAND &
+        ~filters.Regex(re.compile(r'^-@')) &
+        ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team)$', re.IGNORECASE)),
+        handle_general_message
+    )],
+    states={
+        SELECT_ROLE: [CallbackQueryHandler(confirmation_handler, pattern='^role:.*$|^cancel_role_selection$')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+    allow_reentry=False,
+)
 
 # ------------------ Command Handlers ------------------
 
@@ -1177,69 +1221,6 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         logger.error(f"Error in list_muted_command handler: {e}")
         await update.message.reply_text("An error occurred while listing muted users. Please try again later.")
-
-# ------------------ Conversation Handlers ------------------
-
-# Define the ConversationHandler for specific user commands
-specific_user_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(re.compile(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', re.IGNORECASE)), specific_user_trigger)],
-    states={
-        SPECIFIC_USER_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=False,
-)
-
-# Define the ConversationHandler for specific team commands
-specific_team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|c)$', re.IGNORECASE)), specific_team_trigger)],
-    states={
-        SPECIFIC_TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=False,
-)
-
-# Define the ConversationHandler for general team messages (-team)
-team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(re.compile(r'^-team$', re.IGNORECASE)), team_trigger)],
-    states={
-        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=False,
-)
-
-# Define the ConversationHandler for Tara team messages (-t)
-tara_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(re.compile(r'^-t$', re.IGNORECASE)), tara_trigger)],
-    states={
-        TARA_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=False,
-)
-
-# Define the ConversationHandler for general messages
-general_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(
-        (filters.TEXT | filters.Document.ALL) &
-        ~filters.COMMAND &
-        ~filters.Regex(re.compile(r'^-@')) &
-        ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team)$', re.IGNORECASE)),
-        handle_general_message
-    )],
-    states={
-        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=False,
-)
 
 # ------------------ Error Handler ------------------
 
