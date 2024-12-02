@@ -169,6 +169,17 @@ def get_display_name(user):
         full_name = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
         return full_name
 
+def get_role_selection_keyboard(roles):
+    """Return an inline keyboard for role selection with a Cancel option."""
+    keyboard = []
+    for role in roles:
+        display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
+        callback_data = f"role:{role}"
+        keyboard.append([InlineKeyboardButton(display_name, callback_data=callback_data)])
+    # Add a Cancel button
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_role_selection')])
+    return InlineKeyboardMarkup(keyboard)
+
 async def forward_messages(bot, messages, target_ids, sender_role):
     """Forward multiple documents or text messages to a list of target user IDs and notify about the sender's role."""
     # Get the display name for the sender's role
@@ -697,8 +708,6 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
     else:
         # Handle single message
-        roles = get_user_roles(user_id)
-
         if len(roles) > 1:
             # Present role selection keyboard
             keyboard = get_role_selection_keyboard(roles)
@@ -717,10 +726,22 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
             # Handle PDF documents and text messages
             if message.document and message.document.mime_type == 'application/pdf':
                 # Send confirmation using UUID
-                await send_confirmation([message], context, selected_role, list(ROLE_MAP.get(selected_role, [])), target_roles=SENDING_ROLE_TARGETS.get(selected_role, []))
+                await send_confirmation(
+                    [message],
+                    context,
+                    selected_role,
+                    list(ROLE_MAP.get(selected_role, [])),
+                    target_roles=SENDING_ROLE_TARGETS.get(selected_role, [])
+                )
             elif message.text:
                 # Send confirmation using UUID
-                await send_confirmation([message], context, selected_role, list(ROLE_MAP.get(selected_role, [])), target_roles=SENDING_ROLE_TARGETS.get(selected_role, []))
+                await send_confirmation(
+                    [message],
+                    context,
+                    selected_role,
+                    list(ROLE_MAP.get(selected_role, [])),
+                    target_roles=SENDING_ROLE_TARGETS.get(selected_role, [])
+                )
             else:
                 await message.reply_text("Please send PDF documents or text messages only.")
                 logger.warning(f"User {user_id} sent an unsupported message type.")
@@ -779,6 +800,15 @@ async def process_media_group(media_group_id, context):
         await send_confirmation(messages, context, selected_role, list(target_ids), target_roles=target_roles)
 
         return CONFIRMATION
+
+# ------------------ Error Handler ------------------
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Log the error and send a message to the user if necessary."""
+    logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
+    # Optionally, notify the user about the error
+    if isinstance(update, Update) and update.message:
+        await update.message.reply_text("An error occurred. Please try again later.")
 
 # ------------------ Command Handlers ------------------
 
@@ -1071,15 +1101,6 @@ general_conv_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
 )
-
-# ------------------ Error Handler ------------------
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    """Log the error and send a message to the user if necessary."""
-    logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
-    # Optionally, notify the user about the error
-    if isinstance(update, Update) and update.message:
-        await update.message.reply_text("An error occurred. Please try again later.")
 
 # ------------------ Main Function ------------------
 
