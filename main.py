@@ -34,7 +34,7 @@ from roles import (
 # Enable logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.DEBUG  # Temporarily set to DEBUG for detailed logs
+    level=logging.DEBUG  # Set to DEBUG for detailed logs
 )
 logger = logging.getLogger(__name__)
 
@@ -576,8 +576,8 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         sender_role = context.bot_data.get('sender_role')
 
         if not sender_role:
-            await message.reply_text("You don't have a role assigned to use this bot.")
-            logger.warning(f"Unauthorized access attempt by user {user_id}.")
+            await message.reply_text("An error occurred. Please try again.")
+            logger.error(f"No sender role found in bot_data for user {user_id}.")
             return ConversationHandler.END
 
         target_roles = SENDING_ROLE_TARGETS.get(sender_role, [])
