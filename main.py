@@ -8,12 +8,7 @@ import uuid
 import asyncio
 from pathlib import Path
 from collections import defaultdict
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    InputMediaDocument,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -199,21 +194,31 @@ async def forward_messages(bot, messages, target_ids, sender_role):
 
         # Prepare media group for documents
         media_group = []
-        text_messages = []
         for msg in messages:
             if msg.document:
-                media = InputMediaDocument(
-                    media=msg.document.file_id,
-                    caption=caption if msg == messages[0] else None,  # Only the first document has the caption
-                )
+                media = {
+                    'type': 'document',
+                    'media': msg.document.file_id,
+                    'caption': caption if msg == messages[0] else None,  # Only the first document has the caption
+                    'parse_mode': 'Markdown'
+                }
                 media_group.append(media)
             elif msg.text:
-                text_messages.append(msg.text)
+                # Telegram does not support media groups for text messages. Send them individually.
+                for user_id in target_ids:
+                    try:
+                        await bot.send_message(
+                            chat_id=user_id,
+                            text=f"{caption}\n\n{msg.text}",
+                            parse_mode='Markdown'
+                        )
+                        logger.info(f"Forwarded text message to {user_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to forward text message to {user_id}: {e}")
             else:
                 # Handle other message types if necessary
                 pass
 
-        # Send media group if any
         if media_group:
             for user_id in target_ids:
                 try:
@@ -224,20 +229,6 @@ async def forward_messages(bot, messages, target_ids, sender_role):
                     logger.info(f"Forwarded media group to {user_id}")
                 except Exception as e:
                     logger.error(f"Failed to forward media group to {user_id}: {e}")
-
-        # Send text messages if any
-        for text in text_messages:
-            for user_id in target_ids:
-                try:
-                    await bot.send_message(
-                        chat_id=user_id,
-                        text=f"{caption}\n\n{text}",
-                        parse_mode='Markdown'
-                    )
-                    logger.info(f"Forwarded text message to {user_id}")
-                except Exception as e:
-                    logger.error(f"Failed to forward text message to {user_id}: {e}")
-
     except Exception as e:
         logger.error(f"Error in forward_messages: {e}")
 
@@ -451,7 +442,7 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
         # Ensure only the specific user is targeted
         target_ids = [target_user_id]
         target_roles = ['specific_user']
-        sender_role = context.bot_data.get('sender_role', 'tara_team')  # Tara Team is sending the message
+        sender_role = context.bot_data.get('sender_role', 'tara_team')  # Default to 'tara_team'
 
         # Store the message for confirmation
         messages_to_send = [message]
@@ -892,7 +883,7 @@ async def process_media_group(media_group_id, context):
         else:
             # Single role, proceed to send message
             selected_role = roles[0]
-            context.bot_data['sender_role'] = selected_role
+            application.bot_data['sender_role'] = selected_role
 
             target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
             target_ids = set()
@@ -1088,7 +1079,6 @@ async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await update.message.reply_text(f"User ID {target_user_id} has been muted.")
                 logger.info(f"User {user_id} has muted user {target_user_id}.")
-
     except Exception as e:
         logger.error(f"Error in mute_command handler: {e}")
         await update.message.reply_text("An error occurred while muting the user. Please try again later.")
@@ -1139,7 +1129,6 @@ async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(f"User ID {target_user_id} is not muted.")
             logger.warning(f"Attempt to unmute user {target_user_id} who is not muted by user {user_id}.")
-
     except Exception as e:
         logger.error(f"Error in unmute_id_command handler: {e}")
         await update.message.reply_text("An error occurred while unmuting the user. Please try again later.")
@@ -1174,7 +1163,6 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         muted_users_text = "\n".join(muted_list)
         await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
         logger.info(f"User {user_id} requested the list of muted users.")
-
     except Exception as e:
         logger.error(f"Error in list_muted_command handler: {e}")
         await update.message.reply_text("An error occurred while listing muted users. Please try again later.")
@@ -1189,7 +1177,7 @@ specific_user_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=False,
+    allow_reentry=True,
 )
 
 # Define the ConversationHandler for specific team commands
@@ -1200,7 +1188,7 @@ specific_team_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=False,
+    allow_reentry=True,
 )
 
 # Define the ConversationHandler for general team messages (-team)
@@ -1211,7 +1199,7 @@ team_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=False,
+    allow_reentry=True,
 )
 
 # Define the ConversationHandler for Tara team messages (-t)
@@ -1222,7 +1210,7 @@ tara_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=False,
+    allow_reentry=True,
 )
 
 # Define the ConversationHandler for general messages
@@ -1239,7 +1227,7 @@ general_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=False,
+    allow_reentry=True,
 )
 
 # ------------------ Error Handler ------------------
