@@ -451,7 +451,7 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
         # Ensure only the specific user is targeted
         target_ids = [target_user_id]
         target_roles = ['specific_user']
-        sender_role = context.bot_data.get('sender_role', 'tara_team')  # Default to 'tara_team'
+        sender_role = context.bot_data.get('sender_role', 'tara_team')  # Tara Team is sending the message
 
         # Store the message for confirmation
         messages_to_send = [message]
@@ -892,7 +892,7 @@ async def process_media_group(media_group_id, context):
         else:
             # Single role, proceed to send message
             selected_role = roles[0]
-            application.bot_data['sender_role'] = selected_role
+            context.bot_data['sender_role'] = selected_role
 
             target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
             target_ids = set()
@@ -1189,7 +1189,7 @@ specific_user_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=True,
+    allow_reentry=False,
 )
 
 # Define the ConversationHandler for specific team commands
@@ -1200,7 +1200,7 @@ specific_team_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=True,
+    allow_reentry=False,
 )
 
 # Define the ConversationHandler for general team messages (-team)
@@ -1211,7 +1211,7 @@ team_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=True,
+    allow_reentry=False,
 )
 
 # Define the ConversationHandler for Tara team messages (-t)
@@ -1222,7 +1222,7 @@ tara_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=True,
+    allow_reentry=False,
 )
 
 # Define the ConversationHandler for general messages
@@ -1239,7 +1239,7 @@ general_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=True,
+    allow_reentry=False,
 )
 
 # ------------------ Error Handler ------------------
