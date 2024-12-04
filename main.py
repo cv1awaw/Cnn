@@ -581,18 +581,17 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
 
         if len(roles) > 1:
-            # User has multiple roles, prompt to choose one
-            context.bot_data['pending_message'] = update.message
-            context.bot_data['pending_action'] = 'team'  # Flag to indicate -team command
-            keyboard = get_role_selection_keyboard(roles)
-            await update.message.reply_text(
-                "You have multiple roles. Please choose which role you want to use to send this message:",
-                reply_markup=keyboard
-            )
-            logger.info(f"User {user_id} has multiple roles and is prompted to select one for -team command.")
-            return SELECT_ROLE
-      
-            else:
+    # User has multiple roles, prompt to choose one
+    context.bot_data['pending_message'] = update.message
+    context.bot_data['pending_action'] = 'team'  # Flag to indicate -team command
+    keyboard = get_role_selection_keyboard(roles)
+    await update.message.reply_text(
+        "You have multiple roles. Please choose which role you want to use to send this message:",
+        reply_markup=keyboard
+    )
+    logger.info(f"User {user_id} has multiple roles and is prompted to select one for -team command.")
+    return SELECT_ROLE
+else:
     # User has a single role, proceed to confirmation
     selected_role = roles[0]
     context.bot_data['sender_role'] = selected_role
