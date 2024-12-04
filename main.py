@@ -76,14 +76,17 @@ TRIGGER_TARGET_MAP = {
 
 # Define target roles for each role based on user requirements
 SENDING_ROLE_TARGETS = {
-    'writer': ['mcqs_team', 'checker_team', 'tara_team'],
-    'mcqs_team': ['design_team', 'tara_team'],
-    'checker_team': ['tara_team', 'word_team'],
-    'word_team': ['tara_team'],
-    'design_team': ['tara_team', 'king_team'],
-    'king_team': ['tara_team'],
-    'tara_team': ['writer', 'mcqs_team', 'checker_team', 'word_team', 'design_team', 'king_team', 'tara_team'],
-    'mind_map_form_creator': ['tara_team'],  # Assuming only Tara Team
+    'writer': ['writer', 'mcqs_team', 'checker_team', 'tara_team'],
+    'mcqs_team': ['mcqs_team', 'design_team', 'tara_team'],
+    'checker_team': ['checker_team', 'tara_team', 'word_team'],
+    'word_team': ['word_team', 'tara_team'],
+    'design_team': ['design_team', 'tara_team', 'king_team'],
+    'king_team': ['king_team', 'tara_team'],
+    'tara_team': [
+        'writer', 'mcqs_team', 'checker_team',
+        'word_team', 'design_team', 'king_team', 'tara_team'
+    ],
+    'mind_map_form_creator': ['mind_map_form_creator', 'tara_team'],  # Assuming only Tara Team
 }
 
 # ------------------ Define Conversation States ------------------
@@ -414,7 +417,6 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             # Store the message and targets for confirmation
             messages_to_send = [pending_message]
             target_ids = list(target_ids)
-            target_roles = target_roles
             sender_role = selected_role
 
             # Send confirmation using UUID
@@ -526,19 +528,18 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"User {user_id} attempted to use -team without a role.")
             return ConversationHandler.END
 
-        # Store the user's role
-        selected_role = roles[0]  # Use the first role
+        # Assuming single role per user for simplicity
+        selected_role = roles[0]
         context.bot_data['sender_role'] = selected_role
 
-        # Determine target roles: user's team and Tara Team
+        # Determine target roles: user's own role and Tara Team
         target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
-        target_roles.append('tara_team')  # Ensure Tara Team is always included
 
         # Determine target user IDs
         target_ids = set()
         for role in target_roles:
             target_ids.update(ROLE_MAP.get(role, []))
-        target_ids.discard(user_id)
+        target_ids.discard(user_id)  # Prevent sending to self if necessary
 
         if not target_ids:
             await update.message.reply_text("No recipients found to send your message.")
