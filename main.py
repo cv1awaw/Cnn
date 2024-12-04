@@ -264,8 +264,8 @@ async def send_confirmation(messages, context, sender_role, target_ids, target_r
         # Send the confirmation message
         confirmation_message = await messages[0].reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
 
-        # Store confirmation data using UUID
-        context.bot_data[f'confirm_{confirmation_uuid}'] = {
+        # Store confirmation data using UUID in user_data
+        context.user_data[f'confirm_{confirmation_uuid}'] = {
             'messages': messages,
             'target_ids': target_ids,
             'sender_role': sender_role,
@@ -309,7 +309,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 logger.error("Failed to parse confirmation data.")
                 return ConversationHandler.END
 
-            confirm_data = context.bot_data.get(f'confirm_{confirmation_uuid}')
+            confirm_data = context.user_data.get(f'confirm_{confirmation_uuid}')
 
             if not confirm_data:
                 await query.edit_message_text("An error occurred. Please try again.")
@@ -360,15 +360,15 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 logger.info(f"User {query.from_user.id} confirmed and sent the messages.")
 
                 # Clean up the stored data
-                del context.bot_data[f'confirm_{confirmation_uuid}']
+                del context.user_data[f'confirm_{confirmation_uuid}']
 
             elif action == 'cancel':
                 await query.edit_message_text("Operation cancelled.")
                 logger.info(f"User {query.from_user.id} cancelled the message sending for UUID {confirmation_uuid}.")
 
                 # Clean up the stored data
-                if f'confirm_{confirmation_uuid}' in context.bot_data:
-                    del context.bot_data[f'confirm_{confirmation_uuid}']
+                if f'confirm_{confirmation_uuid}' in context.user_data:
+                    del context.user_data[f'confirm_{confirmation_uuid}']
 
         else:
             await query.edit_message_text("Invalid choice.")
@@ -390,21 +390,21 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         if data.startswith('role:'):
             selected_role = data.split(':', 1)[1]
-            context.bot_data['sender_role'] = selected_role
+            context.user_data['sender_role'] = selected_role
 
             # Retrieve the pending message
-            pending_message = context.bot_data.get('pending_message')
+            pending_message = context.user_data.get('pending_message')
             if not pending_message:
                 await query.edit_message_text("No pending messages found. Please try again.")
                 logger.error("No pending message found during role selection.")
                 return ConversationHandler.END
 
             # Determine target_ids based on selected_role
-            target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
-            # Ensure Tara Team is included if the pending message is from -team command
-            # Assuming that if the pending message text starts with '-team', we include Tara Team
+            target_roles = set(SENDING_ROLE_TARGETS.get(selected_role, []))
+
+            # Check if the pending message is from -team command
             if pending_message.text.strip().lower() == '-team':
-                target_roles.append('tara_team')
+                target_roles.add('tara_team')
 
             target_ids = set()
             for role in target_roles:
@@ -419,7 +419,7 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             # Store the message and targets for confirmation
             messages_to_send = [pending_message]
             target_ids = list(target_ids)
-            target_roles = target_roles
+            target_roles = list(target_roles)
             sender_role = selected_role
 
             # Send confirmation using UUID
@@ -428,8 +428,8 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.edit_message_text("Processing your message...")
             logger.info(f"User {query.from_user.id} selected role '{selected_role}' and is prompted for confirmation.")
 
-            # Remove the pending message from bot_data
-            del context.bot_data['pending_message']
+            # Remove the pending message from user_data
+            del context.user_data['pending_message']
 
             return CONFIRMATION
 
@@ -473,10 +473,10 @@ async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TY
             logger.warning(f"Tara Team member {user_id} attempted to target non-existent user @{target_username}.")
             return ConversationHandler.END
 
-        # Store target user ID and other necessary data in bot_data
-        context.bot_data['target_user_id'] = target_user_id
-        context.bot_data['target_username'] = target_username
-        context.bot_data['sender_role'] = 'tara_team'  # Tara Team is sending the message
+        # Store target user ID and other necessary data in user_data
+        context.user_data['target_user_id'] = target_user_id
+        context.user_data['target_username'] = target_username
+        context.user_data['sender_role'] = 'tara_team'  # Tara Team is sending the message
 
         await update.message.reply_text(f"Write your message for user `@{target_username}`.", parse_mode='Markdown')
         logger.info(f"User {user_id} is sending a message to user @{target_username} (ID: {target_user_id}).")
@@ -507,9 +507,9 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
             logger.warning(f"Invalid trigger '{message}' from user {user_id}.")
             return ConversationHandler.END
 
-        # Store target roles in bot_data
-        context.bot_data['specific_target_roles'] = target_roles
-        context.bot_data['sender_role'] = 'tara_team'  # Tara Team is sending the message
+        # Store target roles in user_data
+        context.user_data['specific_target_roles'] = target_roles
+        context.user_data['sender_role'] = 'tara_team'  # Tara Team is sending the message
 
         await update.message.reply_text("Write your message for your team.")
         logger.info(f"User {user_id} is sending a message to roles {target_roles}.")
@@ -533,7 +533,7 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if len(roles) > 1:
             # User has multiple roles, prompt to choose one
-            context.bot_data['pending_message'] = update.message
+            context.user_data['pending_message'] = update.message
             keyboard = get_role_selection_keyboard(roles)
             await update.message.reply_text(
                 "You have multiple roles. Please choose which role you want to use to send this message:",
@@ -544,11 +544,11 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             # User has a single role, proceed to confirmation
             selected_role = roles[0]
-            context.bot_data['sender_role'] = selected_role
+            context.user_data['sender_role'] = selected_role
 
             # Determine target roles: user's team and Tara Team
-            target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
-            target_roles.append('tara_team')  # Ensure Tara Team is always included
+            target_roles = set(SENDING_ROLE_TARGETS.get(selected_role, []))
+            target_roles.add('tara_team')  # Ensure Tara Team is always included
 
             # Determine target user IDs
             target_ids = set()
@@ -564,6 +564,7 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Store the message and targets for confirmation
             messages_to_send = [update.message]
             target_ids = list(target_ids)
+            target_roles = list(target_roles)
             sender_role = selected_role
 
             # Send confirmation using UUID
@@ -591,7 +592,7 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Store the user's role
         selected_role = roles[0]  # Use the first role
-        context.bot_data['sender_role'] = selected_role
+        context.user_data['sender_role'] = selected_role
 
         target_roles = ['tara_team']
         target_ids = set(ROLE_MAP.get('tara_team', []))
@@ -658,7 +659,7 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
 
         if len(roles) > 1:
             # User has multiple roles, prompt to choose one
-            context.bot_data['pending_message'] = message
+            context.user_data['pending_message'] = message
             keyboard = get_role_selection_keyboard(roles)
             await message.reply_text(
                 "You have multiple roles. Please choose which role you want to use to send this message:",
@@ -669,9 +670,9 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         else:
             # User has a single role, proceed to confirmation
             selected_role = roles[0]
-            context.bot_data['sender_role'] = selected_role
+            context.user_data['sender_role'] = selected_role
 
-            target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
+            target_roles = set(SENDING_ROLE_TARGETS.get(selected_role, []))
             target_ids = set()
             for role in target_roles:
                 target_ids.update(ROLE_MAP.get(role, []))
@@ -685,7 +686,7 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
             # Store the message and targets for confirmation
             messages_to_send = [message]
             target_ids = list(target_ids)
-            target_roles = target_roles
+            target_roles = list(target_roles)
             sender_role = selected_role
 
             # Send confirmation using UUID
