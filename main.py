@@ -1,5 +1,3 @@
-# main.py
-
 import logging
 import os
 import re
@@ -62,30 +60,6 @@ ROLE_DISPLAY_NAMES = {
     'king_team': 'Admin Team',
     'tara_team': 'Tara Team',
     'mind_map_form_creator': 'Mind Map & Form Creation Team',  # Newly added
-}
-
-# Define trigger to target roles mapping
-TRIGGER_TARGET_MAP = {
-    '-w': ['writer'],
-    '-e': ['checker_team'],          # Editor Team
-    '-mcq': ['mcqs_team'],
-    '-d': ['word_team'],
-    '-de': ['design_team'],
-    '-mf': ['mind_map_form_creator'],
-    '-c': ['checker_team'],          # Newly added trigger for Checker Team
-}
-
-# Define target roles for each role
-# Adjusted to ensure that other roles can only send messages to 'tara_team' and their own role
-SENDING_ROLE_TARGETS = {
-    'writer': ['writer', 'tara_team'],
-    'mcqs_team': ['mcqs_team', 'tara_team'],
-    'checker_team': ['checker_team', 'tara_team'],
-    'word_team': ['word_team', 'tara_team'],
-    'design_team': ['design_team', 'tara_team'],
-    'king_team': ['king_team', 'tara_team'],
-    'tara_team': list(ROLE_MAP.keys()),  # Tara can send to all roles
-    'mind_map_form_creator': ['mind_map_form_creator', 'tara_team'],
 }
 
 # ------------------ Define Conversation States ------------------
@@ -442,7 +416,7 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
         # Ensure only the specific user is targeted
         target_ids = [target_user_id]
         target_roles = ['specific_user']
-        sender_role = context.bot_data.get('sender_role', 'tara_team')  # Default to 'tara_team'
+        sender_role = context.bot_data.get('sender_role', 'tara_team')  # Tara Team is sending the message
 
         # Store the message for confirmation
         messages_to_send = [message]
@@ -971,17 +945,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/refresh - Refresh your user information.\n"
             "/cancel - Cancel the current operation.\n\n"
             "*Message Sending Triggers:*\n"
-            "`-team` - Send a message to your own team and Tara Team.\n"
+            "`-team` - Send a message to your allowed roles and Tara Team.\n"
             "`-t` - Send a message exclusively to the Tara Team.\n\n"
             "*Specific Commands for Tara Team:*\n"
             "`-@username` - Send a message to a specific user.\n"
-            "`-w` - Send a message to the Writer Team.\n"
-            "`-e` - Send a message to the Editor Team.\n"
-            "`-mcq` - Send a message to the MCQs Team.\n"
-            "`-d` - Send a message to the Digital Writers.\n"
-            "`-de` - Send a message to the Design Team.\n"
-            "`-mf` - Send a message to the Mind Map & Form Creation Team.\n"
-            "`-c` - Send a message to the Editor Team.\n\n"
+            "`-w` - Send a message to the MCQs Team, Checker Team, and Tara Team.\n"
+            "`-e` - Send a message to the Tara Team and Word Team.\n"
+            "`-mcq` - Send a message to the Design Team and Tara Team.\n"
+            "`-d` - Send a message to the Tara Team.\n"
+            "`-de` - Send a message to the Tara Team and King Team.\n"
+            "`-mf` - Send a message to the Tara Team.\n"
+            "`-c` - Send a message to the Tara Team and Checker Team.\n\n"
             "*Admin Commands (Tara Team only):*\n"
             "/mute [user_id] - Mute yourself or another user.\n"
             "/muteid <user_id> - Mute a specific user by their ID.\n"
@@ -1079,6 +1053,7 @@ async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await update.message.reply_text(f"User ID {target_user_id} has been muted.")
                 logger.info(f"User {user_id} has muted user {target_user_id}.")
+
     except Exception as e:
         logger.error(f"Error in mute_command handler: {e}")
         await update.message.reply_text("An error occurred while muting the user. Please try again later.")
@@ -1129,6 +1104,7 @@ async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(f"User ID {target_user_id} is not muted.")
             logger.warning(f"Attempt to unmute user {target_user_id} who is not muted by user {user_id}.")
+
     except Exception as e:
         logger.error(f"Error in unmute_id_command handler: {e}")
         await update.message.reply_text("An error occurred while unmuting the user. Please try again later.")
