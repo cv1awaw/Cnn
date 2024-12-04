@@ -6,7 +6,9 @@ import uuid
 import asyncio
 from pathlib import Path
 from collections import defaultdict
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatType
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup  # Removed ChatType
+# If you need ChatType in the future, uncomment the following line:
+# from telegram.enums import ChatType
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -544,30 +546,38 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.error(f"No sender role found in bot_data for user {user_id}.")
             return ConversationHandler.END
 
+        # Retrieve the temporary messages stored during role selection
+        temp_messages = context.bot_data.get('temp_messages', [])
+
+        if not temp_messages:
+            await message.reply_text("No pending messages found. Please try again.")
+            logger.error(f"No temporary messages found for user {user_id}.")
+            return ConversationHandler.END
+
+        # Add the new message to the list
+        temp_messages.append(message)
+
+        # Update the temporary messages in bot_data
+        context.bot_data['temp_messages'] = temp_messages
+
+        # Determine target roles based on selected role
         target_roles = SENDING_ROLE_TARGETS.get(sender_role, [])
         target_ids = set()
-
         for role in target_roles:
             target_ids.update(ROLE_MAP.get(role, []))
-
-        # Exclude the sender's user ID from all forwards
-        target_ids.discard(user_id)
+        target_ids.discard(user_id)  # Exclude the sender
 
         if not target_ids:
             await message.reply_text("No recipients found to send your message.")
             logger.warning(f"No recipients found for user {user_id} with role '{sender_role}'.")
             return ConversationHandler.END
 
-        # Store the message and targets for confirmation
-        messages_to_send = [message]
         target_ids = list(target_ids)
-        target_roles = target_roles
-        sender_role = sender_role
 
         # Send confirmation using UUID
-        await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
+        await send_confirmation(temp_messages, context, sender_role, target_ids, target_roles=target_roles)
 
-        logger.info(f"User {user_id} is sending a message with role '{sender_role}'.")
+        logger.info(f"User {user_id} composed a message and is prompted for confirmation.")
 
         return CONFIRMATION
 
@@ -730,8 +740,10 @@ async def process_media_group(media_group_id, context):
                 logger.warning(f"No recipients found for user {user_id} with role '{selected_role}' in media group {media_group_id}.")
                 return
 
+            target_ids = list(target_ids)
+
             # Send confirmation using UUID
-            await send_confirmation(messages, context, selected_role, list(target_ids), target_roles=target_roles)
+            await send_confirmation(messages, context, selected_role, target_ids, target_roles=target_roles)
             logger.info(f"User {user_id} is sending media group {media_group_id} with role '{selected_role}'.")
 
             return CONFIRMATION
