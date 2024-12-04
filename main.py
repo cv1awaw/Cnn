@@ -93,7 +93,7 @@ TRIGGER_TARGET_MAP = {
 
 # ------------------ Define Conversation States ------------------
 
-SELECT_ROLE, TEAM_MESSAGE, CONFIRMATION = range(3)
+SELECT_ROLE, TEAM_MESSAGE, SPECIFIC_TEAM_MESSAGE, CONFIRMATION = range(4)
 
 # ------------------ User Data Storage ------------------
 
@@ -332,6 +332,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 # Prepare display names for confirmation
                 sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
 
+                # Check if sending to specific users
                 if 'specific_user' in target_roles:
                     recipient_display_names = []
                     for tid in target_ids:
@@ -1025,6 +1026,7 @@ specific_user_conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
+    per_message=True,  # Added to align with CallbackQueryHandler expectations
 )
 
 # Define the ConversationHandler for specific team commands
@@ -1036,6 +1038,7 @@ specific_team_conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
+    per_message=True,  # Added to align with CallbackQueryHandler expectations
 )
 
 # Define the ConversationHandler for general team messages (-team)
@@ -1048,6 +1051,7 @@ team_conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
+    per_message=True,  # Added to align with CallbackQueryHandler expectations
 )
 
 # Define the ConversationHandler for Tara team messages (-t)
@@ -1058,6 +1062,7 @@ tara_conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
+    per_message=True,  # Added to align with CallbackQueryHandler expectations
 )
 
 # Define the ConversationHandler for general messages
@@ -1075,6 +1080,7 @@ general_conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
+    per_message=True,  # Added to align with CallbackQueryHandler expectations
 )
 
 # ------------------ Error Handler ------------------
