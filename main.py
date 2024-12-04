@@ -570,67 +570,73 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
         return ConversationHandler.END
 
 async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the -team trigger to send a message to the user's team and Tara Team."""
     try:
         user_id = update.message.from_user.id
         roles = get_user_roles(user_id)
 
         if len(roles) > 1:
-    # User has multiple roles, prompt to choose one
-    context.bot_data['pending_message'] = update.message
-    context.bot_data['pending_action'] = 'team'  # Flag to indicate -team command
-    
-    # Create a keyboard for role selection
-    keyboard = get_role_selection_keyboard(roles)
-    
-    # Prompt the user to select a role
-    await update.message.reply_text(
-        "You have multiple roles. Please choose which role you want to use to send this message:",
-        reply_markup=keyboard
-    )
-    
-    # Log the action
-    logger.info(f"User {user_id} has multiple roles and is prompted to select one for -team command.")
-    
-    # Return the next conversation state
-    return SELECT_ROLE
-else:
-    # User has a single role, proceed to confirmation
-    selected_role = roles[0]
-    context.bot_data['sender_role'] = selected_role
+            # User has multiple roles, prompt to choose one
+            context.bot_data['pending_message'] = update.message
+            context.bot_data['pending_action'] = 'team'  # Flag to indicate -team command
+            
+            # Create a keyboard for role selection
+            keyboard = get_role_selection_keyboard(roles)
+            
+            # Prompt the user to select a role
+            await update.message.reply_text(
+                "You have multiple roles. Please choose which role you want to use to send this message:",
+                reply_markup=keyboard
+            )
+            
+            # Log the action
+            logger.info(f"User {user_id} has multiple roles and is prompted to select one for -team command.")
+            
+            # Return the next conversation state
+            return SELECT_ROLE
+        else:
+            # User has a single role, proceed to confirmation
+            selected_role = roles[0]
+            context.bot_data['sender_role'] = selected_role
 
-    # Determine target roles: selected role's targets
-    target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
+            # Determine target roles: selected role's targets
+            target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
 
-    # Ensure only valid roles are included
-    if 'tara_team' not in target_roles:
-        target_roles.append('tara_team')  # Explicitly include "Tara Team"
+            # Ensure only valid roles are included
+            if 'tara_team' not in target_roles:
+                target_roles.append('tara_team')  # Explicitly include "Tara Team"
 
-    target_ids = set()
-    for role in target_roles:
-        # Fetch user IDs only for roles explicitly listed in the mapping
-        role_users = ROLE_MAP.get(role, [])
-        target_ids.update(role_users)
+            target_ids = set()
+            for role in target_roles:
+                # Fetch user IDs only for roles explicitly listed in the mapping
+                role_users = ROLE_MAP.get(role, [])
+                target_ids.update(role_users)
 
-    # Remove the sender's ID from the target list
-    target_ids.discard(user_id)
+            # Remove the sender's ID from the target list
+            target_ids.discard(user_id)
 
-    # Ensure there are recipients
-    if not target_ids:
-        await update.message.reply_text("No recipients found to send your message.")
-        logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
+            # Ensure there are recipients
+            if not target_ids:
+                await update.message.reply_text("No recipients found to send your message.")
+                logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
+                return ConversationHandler.END
+
+            # Store the message and targets for confirmation
+            messages_to_send = [update.message]
+            target_ids = list(target_ids)
+
+            # Send confirmation using UUID
+            await send_confirmation(messages_to_send, context, selected_role, target_ids, target_roles=target_roles)
+
+            logger.info(f"User {user_id} is sending a message to roles {target_roles} via -team command.")
+
+            return CONFIRMATION
+
+    except Exception as e:
+        logger.error(f"Error in team_trigger: {e}")
+        await update.message.reply_text("An error occurred. Please try again later.")
         return ConversationHandler.END
-
-    # Store the message and targets for confirmation
-    messages_to_send = [update.message]
-    target_ids = list(target_ids)
-
-    # Send confirmation using UUID
-    await send_confirmation(messages_to_send, context, selected_role, target_ids, target_roles=target_roles)
-
-    logger.info(f"User {user_id} is sending a message to roles {target_roles} via -team command.")
-
-    return CONFIRMATION
 
     except Exception as e:
         logger.error(f"Error in team_trigger: {e}")
