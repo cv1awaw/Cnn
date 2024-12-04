@@ -457,6 +457,65 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text("An error occurred. Please try again later.")
         return ConversationHandler.END
 
+async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the -team trigger to send a message to the user's team and Tara Team."""
+    try:
+        user_id = update.message.from_user.id
+        roles = get_user_roles(user_id)
+
+        if not roles:
+            await update.message.reply_text("You don't have a role assigned to use this bot.")
+            logger.warning(f"User {user_id} attempted to use -team without a role.")
+            return ConversationHandler.END
+
+        if len(roles) > 1:
+            # User has multiple roles, prompt to choose one
+            context.user_data['pending_message'] = update.message
+            context.user_data['is_team_message'] = True  # Set the flag
+            keyboard = get_role_selection_keyboard(roles)
+            await update.message.reply_text(
+                "You have multiple roles. Please choose which role you want to use to send this message:",
+                reply_markup=keyboard
+            )
+            logger.info(f"User {user_id} has multiple roles and is prompted to select one for -team.")
+            return SELECT_ROLE
+        else:
+            # User has a single role, proceed to confirmation
+            selected_role = roles[0]
+            context.user_data['sender_role'] = selected_role
+
+            # Define target roles as the selected role and Tara Team
+            target_roles = {'tara_team', selected_role}
+
+            # Determine target user IDs
+            target_ids = set()
+            for role in target_roles:
+                target_ids.update(ROLE_MAP.get(role, []))
+            target_ids.discard(user_id)
+
+            if not target_ids:
+                await update.message.reply_text("No recipients found to send your message.")
+                logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
+                return ConversationHandler.END
+
+            # Store the message and targets for confirmation
+            messages_to_send = [update.message]
+            target_ids = list(target_ids)
+            target_roles = list(target_roles)
+            sender_role = selected_role
+
+            # Send confirmation using UUID
+            await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
+
+            logger.info(f"User {user_id} is sending a message to roles {target_roles} using -team.")
+
+            return CONFIRMATION
+
+    except Exception as e:
+        logger.error(f"Error in team_trigger: {e}")
+        await update.message.reply_text("An error occurred. Please try again later.")
+        return ConversationHandler.END
+
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger function when a Tara team member sends a specific user command."""
     try:
@@ -529,8 +588,6 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
         logger.error(f"Error in specific_team_trigger: {e}")
         await update.message.reply_text("An error occurred. Please try again later.")
         return ConversationHandler.END
-
-# The modified team_trigger function is already shown above.
 
 async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the -t trigger to send a message to Tara team."""
@@ -877,6 +934,7 @@ async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(f"User ID {target_user_id} is not muted.")
             logger.warning(f"Attempt to unmute user {target_user_id} who is not muted by user {user_id}.")
+
     except Exception as e:
         logger.error(f"Error in unmute_id_command handler: {e}")
         await update.message.reply_text("An error occurred while unmuting the user. Please try again later.")
@@ -925,7 +983,7 @@ specific_user_conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
-    per_message=False,  # Set to False since entry_points use MessageHandler
+    per_message=True,  # Changed to True
 )
 
 # Define the ConversationHandler for specific team commands
@@ -936,7 +994,7 @@ specific_team_conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
-    per_message=False,  # Set to False since entry_points use MessageHandler
+    per_message=True,  # Changed to True
 )
 
 # Define the ConversationHandler for general team messages (-team)
@@ -948,7 +1006,7 @@ team_conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
-    per_message=False,  # Set to False since entry_points use MessageHandler
+    per_message=True,  # Changed to True
 )
 
 # Define the ConversationHandler for Tara team messages (-t)
@@ -959,7 +1017,7 @@ tara_conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
-    per_message=False,  # Set to False since entry_points use MessageHandler
+    per_message=True,  # Changed to True
 )
 
 # Define the ConversationHandler for general messages
@@ -977,7 +1035,7 @@ general_conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
-    per_message=False,  # Set to False since entry_points use MessageHandler
+    per_message=True,  # Changed to True
 )
 
 # ------------------ Error Handler ------------------
