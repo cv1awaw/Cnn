@@ -62,6 +62,33 @@ ROLE_DISPLAY_NAMES = {
     'mind_map_form_creator': 'Mind Map & Form Creation Team',  # Newly added
 }
 
+# ------------------ Define SENDING_ROLE_TARGETS ------------------
+
+# Define target roles for each role based on new forwarding capabilities
+SENDING_ROLE_TARGETS = {
+    'writer': ['mcqs_team', 'checker_team', 'tara_team'],
+    'mcqs_team': ['design_team', 'tara_team'],
+    'checker_team': ['tara_team', 'word_team'],
+    'word_team': ['tara_team'],
+    'design_team': ['tara_team', 'king_team'],
+    'king_team': ['tara_team'],
+    'tara_team': list(ROLE_MAP.keys()),  # Tara can send to all roles
+    'mind_map_form_creator': ['tara_team'],  # Adjust as needed
+}
+
+# ------------------ Define TRIGGER_TARGET_MAP ------------------
+
+# Define trigger to target roles mapping based on new forwarding capabilities
+TRIGGER_TARGET_MAP = {
+    '-w': ['mcqs_team', 'checker_team', 'tara_team'],
+    '-e': ['tara_team', 'word_team'],          # Editor Team
+    '-mcq': ['design_team', 'tara_team'],
+    '-d': ['tara_team'],
+    '-de': ['tara_team', 'king_team'],
+    '-mf': ['tara_team'],  # Adjust if Mind Map & Form Creation Team needs specific targets
+    '-c': ['tara_team', 'checker_team'],      # Updated trigger for Checker Team
+}
+
 # ------------------ Define Conversation States ------------------
 
 TEAM_MESSAGE = 1
@@ -525,7 +552,7 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=keyboard
             )
             # Store pending messages
-            context.bot_data['pending_messages'] = []
+            context.bot_data['pending_messages'] = [update.message]  # Corrected to store the message
             logger.info(f"User {user_id} has multiple roles and is prompted to select one.")
             return SELECT_ROLE
         else:
