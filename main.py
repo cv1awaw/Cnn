@@ -550,8 +550,6 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "You have multiple roles. Please choose which role you want to use to send this message:",
                 reply_markup=keyboard
             )
-            # Store pending messages
-            context.bot_data['pending_messages'] = []
             logger.info(f"User {user_id} has multiple roles and is prompted to select one.")
             return SELECT_ROLE
         else:
@@ -625,35 +623,10 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             selected_role = data.split(':', 1)[1]
             context.bot_data['sender_role'] = selected_role
 
-            # Retrieve the pending messages
-            pending_messages = context.bot_data.get('pending_messages', [])
-
-            if not pending_messages:
-                await query.edit_message_text("No pending messages found. Please try again.")
-                logger.error(f"No pending messages found for user {query.from_user.id}.")
-                return ConversationHandler.END
-
-            # Remove the pending messages from bot_data
-            del context.bot_data['pending_messages']
-
-            # Determine target_ids and target_roles based on selected_role
-            target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
-            target_ids = set()
-            for role in target_roles:
-                target_ids.update(ROLE_MAP.get(role, []))
-            target_ids.discard(query.from_user.id)
-
-            if not target_ids:
-                await query.edit_message_text("No recipients found to send your message.")
-                logger.warning(f"No recipients found for user {query.from_user.id} with role '{selected_role}'.")
-                return ConversationHandler.END
-
-            # Send confirmation using UUID
-            await send_confirmation(pending_messages, context, selected_role, list(target_ids), target_roles=target_roles)
-
-            await query.edit_message_text("Processing your message...")
-            logger.info(f"User {query.from_user.id} selected role '{selected_role}' and is prompted for confirmation.")
-            return CONFIRMATION
+            # Transition to TEAM_MESSAGE state to receive the message
+            await query.edit_message_text(f"You have selected **{ROLE_DISPLAY_NAMES.get(selected_role, selected_role.capitalize())}** role. Please write your message.")
+            logger.info(f"User {query.from_user.id} selected role '{selected_role}'. Prompting for message.")
+            return TEAM_MESSAGE
 
         elif data == 'cancel_role_selection':
             await query.edit_message_text("Operation cancelled.")
@@ -796,8 +769,6 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
                     "You have multiple roles. Please choose which role you want to use to send this message:",
                     reply_markup=keyboard
                 )
-                # Store pending messages
-                context.bot_data['pending_messages'] = [message]
                 logger.info(f"User {user_id} has multiple roles and is prompted to select one.")
                 return SELECT_ROLE
             else:
@@ -862,8 +833,6 @@ async def process_media_group(media_group_id, context):
                 "You have multiple roles. Please choose which role you want to use to send this message:",
                 reply_markup=keyboard
             )
-            # Store pending messages
-            application.bot_data['pending_messages'] = messages
             logger.info(f"User {user_id} with multiple roles is prompted to select one for media group {media_group_id}.")
             return SELECT_ROLE
         else:
@@ -1065,6 +1034,7 @@ async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await update.message.reply_text(f"User ID {target_user_id} has been muted.")
                 logger.info(f"User {user_id} has muted user {target_user_id}.")
+
     except Exception as e:
         logger.error(f"Error in mute_command handler: {e}")
         await update.message.reply_text("An error occurred while muting the user. Please try again later.")
@@ -1182,6 +1152,7 @@ team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-team$', re.IGNORECASE)), team_trigger)],
     states={
         SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')],
+        TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)],
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
