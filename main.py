@@ -592,8 +592,7 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"User {user_id} has multiple roles and is prompted to select one for -team command.")
             return SELECT_ROLE
       
-            if len(roles) > 1:
-    else:
+            else:
     # User has a single role, proceed to confirmation
     selected_role = roles[0]
     context.bot_data['sender_role'] = selected_role
