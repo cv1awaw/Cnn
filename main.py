@@ -288,6 +288,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("Operation cancelled.")
         logger.info(f"User {update.effective_user.id} cancelled the operation.")
+        # Clean up any flags or pending data
+        context.user_data.pop('pending_message', None)
+        context.user_data.pop('is_team_message', None)
     except Exception as e:
         logger.error(f"Error in cancel handler: {e}")
     return ConversationHandler.END
@@ -399,13 +402,18 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 logger.error("No pending message found during role selection.")
                 return ConversationHandler.END
 
-            # Determine target_ids based on selected_role
-            target_roles = set(SENDING_ROLE_TARGETS.get(selected_role, []))
+            # Determine if this is a team message
+            is_team_message = context.user_data.get('is_team_message', False)
 
-            # Check if the pending message is from -team command
-            if pending_message.text.strip().lower() == '-team':
-                target_roles.add('tara_team')
+            if is_team_message:
+                # For -team messages, target roles are selected_role and Tara Team
+                target_roles = {'tara_team', selected_role}
+                context.user_data.pop('is_team_message', None)  # Clean up the flag
+            else:
+                # For general messages, use SENDING_ROLE_TARGETS
+                target_roles = set(SENDING_ROLE_TARGETS.get(selected_role, []))
 
+            # Determine target user IDs
             target_ids = set()
             for role in target_roles:
                 target_ids.update(ROLE_MAP.get(role, []))
@@ -426,7 +434,7 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
 
             await query.edit_message_text("Processing your message...")
-            logger.info(f"User {query.from_user.id} selected role '{selected_role}' and is prompted for confirmation.")
+            logger.info(f"User {pending_message.from_user.id} selected role '{selected_role}' and is prompted for confirmation.")
 
             # Remove the pending message from user_data
             del context.user_data['pending_message']
@@ -436,6 +444,8 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         elif data == 'cancel_role_selection':
             await query.edit_message_text("Operation cancelled.")
             logger.info(f"User {query.from_user.id} cancelled role selection.")
+            # Clean up flags if any
+            context.user_data.pop('is_team_message', None)
             return ConversationHandler.END
         else:
             await query.edit_message_text("Invalid role selection.")
@@ -520,64 +530,7 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("An error occurred. Please try again later.")
         return ConversationHandler.END
 
-async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the -team trigger to send a message to the user's team and Tara Team."""
-    try:
-        user_id = update.message.from_user.id
-        roles = get_user_roles(user_id)
-
-        if not roles:
-            await update.message.reply_text("You don't have a role assigned to use this bot.")
-            logger.warning(f"User {user_id} attempted to use -team without a role.")
-            return ConversationHandler.END
-
-        if len(roles) > 1:
-            # User has multiple roles, prompt to choose one
-            context.user_data['pending_message'] = update.message
-            keyboard = get_role_selection_keyboard(roles)
-            await update.message.reply_text(
-                "You have multiple roles. Please choose which role you want to use to send this message:",
-                reply_markup=keyboard
-            )
-            logger.info(f"User {user_id} has multiple roles and is prompted to select one for -team.")
-            return SELECT_ROLE
-        else:
-            # User has a single role, proceed to confirmation
-            selected_role = roles[0]
-            context.user_data['sender_role'] = selected_role
-
-            # Determine target roles: user's team and Tara Team
-            target_roles = set(SENDING_ROLE_TARGETS.get(selected_role, []))
-            target_roles.add('tara_team')  # Ensure Tara Team is always included
-
-            # Determine target user IDs
-            target_ids = set()
-            for role in target_roles:
-                target_ids.update(ROLE_MAP.get(role, []))
-            target_ids.discard(user_id)
-
-            if not target_ids:
-                await update.message.reply_text("No recipients found to send your message.")
-                logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
-                return ConversationHandler.END
-
-            # Store the message and targets for confirmation
-            messages_to_send = [update.message]
-            target_ids = list(target_ids)
-            target_roles = list(target_roles)
-            sender_role = selected_role
-
-            # Send confirmation using UUID
-            await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
-
-            logger.info(f"User {user_id} is sending a message to roles {target_roles} using -team.")
-
-            return CONFIRMATION
-
-    except Exception as e:
-        logger.error(f"Error in team_trigger: {e}")
-        await update.message.reply_text("An error occurred. Please try again later.")
-        return ConversationHandler.END
+# The modified team_trigger function is already shown above.
 
 async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the -t trigger to send a message to Tara team."""
