@@ -515,6 +515,53 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("An error occurred. Please try again later.")
         return ConversationHandler.END
 
+async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the -team trigger to send a message to the user's team and Tara Team."""
+    try:
+        user_id = update.message.from_user.id
+        roles = get_user_roles(user_id)
+
+        if not roles:
+            await update.message.reply_text("You don't have a role assigned to use this bot.")
+            logger.warning(f"User {user_id} attempted to use -team without a role.")
+            return ConversationHandler.END
+
+        # Store the user's role
+        selected_role = roles[0]  # Use the first role
+        context.bot_data['sender_role'] = selected_role
+
+        # Determine target roles: user's team and Tara Team
+        target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
+        target_roles.append('tara_team')  # Ensure Tara Team is always included
+
+        # Determine target user IDs
+        target_ids = set()
+        for role in target_roles:
+            target_ids.update(ROLE_MAP.get(role, []))
+        target_ids.discard(user_id)
+
+        if not target_ids:
+            await update.message.reply_text("No recipients found to send your message.")
+            logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
+            return ConversationHandler.END
+
+        # Store the message and targets for confirmation
+        messages_to_send = [update.message]
+        target_ids = list(target_ids)
+        sender_role = selected_role
+
+        # Send confirmation using UUID
+        await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
+
+        logger.info(f"User {user_id} is sending a message to roles {target_roles}.")
+
+        return CONFIRMATION
+
+    except Exception as e:
+        logger.error(f"Error in team_trigger: {e}")
+        await update.message.reply_text("An error occurred. Please try again later.")
+        return ConversationHandler.END
+
 async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the -t trigger to send a message to Tara team."""
     try:
@@ -542,7 +589,6 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Store the message and targets for confirmation
         messages_to_send = [update.message]
         target_ids = list(target_ids)
-        target_roles = target_roles
         sender_role = selected_role
 
         # Send confirmation using UUID
