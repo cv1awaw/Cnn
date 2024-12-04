@@ -593,7 +593,7 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return SELECT_ROLE
         else:
             # User has a single role, proceed to confirmation
-            
+            if len(roles) == 1:
     selected_role = roles[0]
     context.bot_data['sender_role'] = selected_role
 
