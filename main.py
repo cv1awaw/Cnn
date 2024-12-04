@@ -7,7 +7,12 @@ import json
 import uuid
 from pathlib import Path
 from collections import defaultdict
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaDocument
+)
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -190,12 +195,11 @@ async def forward_messages(bot, messages, target_ids, sender_role):
         media_group = []
         for msg in messages:
             if msg.document:
-                media = {
-                    'type': 'document',
-                    'media': msg.document.file_id,
-                    'caption': caption if msg == messages[0] else None,  # Only the first document has the caption
-                    'parse_mode': 'Markdown'
-                }
+                media = InputMediaDocument(
+                    media=msg.document.file_id,
+                    caption=caption if msg == messages[0] else None,
+                    parse_mode='Markdown' if msg == messages[0] else None
+                )
                 media_group.append(media)
             elif msg.text:
                 # Telegram does not support media groups for text messages. Send them individually.
@@ -462,7 +466,6 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 # Store the message and targets for confirmation
                 messages_to_send = [pending_message]
                 target_ids = list(target_ids)
-                target_roles = target_roles
                 sender_role = selected_role
 
                 # Send confirmation using UUID
@@ -733,7 +736,6 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
             # Store the message and targets for confirmation
             messages_to_send = [message]
             target_ids = list(target_ids)
-            target_roles = target_roles
             sender_role = selected_role
 
             # Send confirmation using UUID
@@ -1091,9 +1093,9 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Main function to start the Telegram bot."""
-    BOT_TOKEN = os.getenv('BOT_TOKEN')
+    BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN is not set in environment variables.")
+        logger.error("TELEGRAM_BOT_TOKEN is not set in environment variables.")
         return
 
     try:
