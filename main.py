@@ -593,35 +593,42 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return SELECT_ROLE
         else:
             # User has a single role, proceed to confirmation
-            selected_role = roles[0]
-            context.bot_data['sender_role'] = selected_role
+            
+    selected_role = roles[0]
+    context.bot_data['sender_role'] = selected_role
 
-            # Determine target roles: selected role's targets
-            target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
-            # Ensure 'tara_team' is included explicitly
-            if 'tara_team' not in target_roles:
-                target_roles.append('tara_team')
-            target_ids = set()
-            for role in target_roles:
-                target_ids.update(ROLE_MAP.get(role, []))
-            target_ids.discard(user_id)
+    # Determine target roles: selected role's targets
+    target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
+    
+    # Ensure only valid roles are included
+    if 'tara_team' not in target_roles:
+        target_roles.append('tara_team')  # Explicitly include "Tara Team"
+    
+    target_ids = set()
+    for role in target_roles:
+        # Fetch user IDs only for roles explicitly listed in the mapping
+        role_users = ROLE_MAP.get(role, [])
+        target_ids.update(role_users)
+    
+    # Remove the sender's ID from the target list
+    target_ids.discard(user_id)
 
-            if not target_ids:
-                await update.message.reply_text("No recipients found to send your message.")
-                logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
-                return ConversationHandler.END
+    # Ensure there are recipients
+    if not target_ids:
+        await update.message.reply_text("No recipients found to send your message.")
+        logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
+        return ConversationHandler.END
 
-            # Store the message and targets for confirmation
-            messages_to_send = [update.message]
-            target_ids = list(target_ids)
-            sender_role = selected_role
+    # Store the message and targets for confirmation
+    messages_to_send = [update.message]
+    target_ids = list(target_ids)
 
-            # Send confirmation using UUID
-            await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
+    # Send confirmation using UUID
+    await send_confirmation(messages_to_send, context, selected_role, target_ids, target_roles=target_roles)
 
-            logger.info(f"User {user_id} is sending a message to roles {target_roles} via -team command.")
+    logger.info(f"User {user_id} is sending a message to roles {target_roles} via -team command.")
 
-            return CONFIRMATION
+    return CONFIRMATION
 
     except Exception as e:
         logger.error(f"Error in team_trigger: {e}")
