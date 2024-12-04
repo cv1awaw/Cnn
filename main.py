@@ -591,25 +591,26 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             logger.info(f"User {user_id} has multiple roles and is prompted to select one for -team command.")
             return SELECT_ROLE
-        else:
-            # User has a single role, proceed to confirmation
-            if len(roles) == 1:
+      
+            
+    else:
+    # User has a single role, proceed to confirmation
     selected_role = roles[0]
     context.bot_data['sender_role'] = selected_role
 
     # Determine target roles: selected role's targets
     target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
-    
+
     # Ensure only valid roles are included
     if 'tara_team' not in target_roles:
         target_roles.append('tara_team')  # Explicitly include "Tara Team"
-    
+
     target_ids = set()
     for role in target_roles:
         # Fetch user IDs only for roles explicitly listed in the mapping
         role_users = ROLE_MAP.get(role, [])
         target_ids.update(role_users)
-    
+
     # Remove the sender's ID from the target list
     target_ids.discard(user_id)
 
