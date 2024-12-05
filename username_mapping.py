@@ -17,21 +17,22 @@ if USERNAME_MAPPING_FILE.exists():
             username_mapping = json.load(f)
             # Ensure keys are lowercase for consistency
             username_mapping = {k.lower(): int(v) for k, v in username_mapping.items()}
-            logger.info("Loaded existing username mapping from username_mapping.json.")
+            logger.info("✅ Loaded existing username mapping from username_mapping.json.")
     except json.JSONDecodeError:
         username_mapping = {}
-        logger.error("username_mapping.json is not a valid JSON file. Starting with an empty mapping.")
+        logger.error("❌ username_mapping.json is not a valid JSON file. Starting with an empty mapping.")
 else:
     username_mapping = {}
+    logger.info("🔍 username_mapping.json not found. Starting with an empty mapping.")
 
 def save_username_mapping():
     """Save the username_mapping dictionary to a JSON file."""
     try:
         with open(USERNAME_MAPPING_FILE, 'w') as f:
             json.dump(username_mapping, f, indent=4)
-            logger.info("Saved username mapping to username_mapping.json.")
+            logger.info("💾 Saved username mapping to username_mapping.json.")
     except Exception as e:
-        logger.error(f"Failed to save username mapping: {e}")
+        logger.error(f"❌ Failed to save username mapping: {e}")
 
 def add_username(username, user_id):
     """Add or update a username to the mapping."""
@@ -39,15 +40,15 @@ def add_username(username, user_id):
     if username_lower not in username_mapping:
         username_mapping[username_lower] = user_id
         save_username_mapping()
-        logger.info(f"Added username '{username_lower}' mapped to user ID {user_id}.")
+        logger.info(f"➕ Added username '{username_lower}' mapped to user ID {user_id}.")
         return True
     if username_mapping[username_lower] != user_id:
         # Update the mapping if user_id has changed
         username_mapping[username_lower] = user_id
         save_username_mapping()
-        logger.info(f"Updated username '{username_lower}' to map to user ID {user_id}.")
+        logger.info(f"🔄 Updated username '{username_lower}' to map to user ID {user_id}.")
         return True
-    logger.info(f"Username '{username_lower}' is already mapped to user ID {user_id}.")
+    logger.info(f"ℹ️ Username '{username_lower}' is already mapped to user ID {user_id}.")
     return False
 
 def get_user_id(username):
