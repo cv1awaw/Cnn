@@ -1,3 +1,5 @@
+# main.py
+
 import logging
 import os
 import re
@@ -74,6 +76,7 @@ TRIGGER_TARGET_MAP = {
 
 # Define target roles for each role based on user requirements
 # **Updated to match the desired forwarding rules**
+# This mapping is used for specific triggers like -w, -mcq, etc.
 SENDING_ROLE_TARGETS = {
     'writer': ['mcqs_team', 'checker_team', 'tara_team'],
     'mcqs_team': ['design_team', 'tara_team'],
@@ -85,7 +88,7 @@ SENDING_ROLE_TARGETS = {
         'writer', 'mcqs_team', 'checker_team',
         'word_team', 'design_team', 'king_team', 'tara_team'
     ],
-    'mind_map_form_creator': ['mind_map_form_creator', 'tara_team'],  # Assuming only Tara Team
+    'mind_map_form_creator': ['tara_team'],  # Only Tara Team
 }
 
 # ------------------ Define Conversation States ------------------
@@ -523,8 +526,8 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         selected_role = roles[0]
         context.bot_data['sender_role'] = selected_role
 
-        # Determine target roles: based on updated forwarding rules
-        target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
+        # **NEW**: Define target roles as [sender's own role, 'tara_team']
+        target_roles = [selected_role, 'tara_team']
         target_ids = set()
         for role in target_roles:
             target_ids.update(ROLE_MAP.get(role, []))
@@ -971,7 +974,6 @@ specific_team_conv_handler = ConversationHandler(
 team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-team$', re.IGNORECASE)), team_trigger)],
     states={
-        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')],
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -996,7 +998,7 @@ general_conv_handler = ConversationHandler(
         (filters.TEXT | filters.Document.ALL) &
         ~filters.COMMAND &
         ~filters.Regex(re.compile(r'^-@')) &
-        ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team)$', re.IGNORECASE)),
+        ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|c|t|team)$', re.IGNORECASE)),
         handle_general_message
     )],
     states={
