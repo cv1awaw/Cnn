@@ -9,8 +9,7 @@
     "mind_map_form_creator": [1703780092],
     "role_masters": [6177929931],
     "username_mapping": {
-        "username1": 123456789,
-        "username2": 987654321
+        "your_username": 6177929931
         // Add more mappings as users interact with the bot
     },
     "muted_users": [1111111, 2222222]
