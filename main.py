@@ -17,15 +17,13 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
 )
-from roles import (
-    WRITER_IDS,
-    MCQS_TEAM_IDS,
-    CHECKER_TEAM_IDS,
-    WORD_TEAM_IDS,
-    DESIGN_TEAM_IDS,
-    KING_TEAM_IDS,
-    TARA_TEAM_IDS,
-    MIND_MAP_FORM_CREATOR_IDS,  # Newly added
+from role_master import (
+    add_role,
+    remove_role,
+    get_roles,
+    list_users_with_role,
+    assign_roles,
+    remove_roles,
 )
 
 # ------------------ Setup Logging ------------------
@@ -38,18 +36,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ------------------ Define Roles ------------------
-
-# Define roles and their corresponding IDs
-ROLE_MAP = {
-    'writer': WRITER_IDS,
-    'mcqs_team': MCQS_TEAM_IDS,
-    'checker_team': CHECKER_TEAM_IDS,
-    'word_team': WORD_TEAM_IDS,
-    'design_team': DESIGN_TEAM_IDS,
-    'king_team': KING_TEAM_IDS,
-    'tara_team': TARA_TEAM_IDS,
-    'mind_map_form_creator': MIND_MAP_FORM_CREATOR_IDS,  # Newly added
-}
 
 # Define display names for each role
 ROLE_DISPLAY_NAMES = {
@@ -94,42 +80,6 @@ SENDING_ROLE_TARGETS = {
 
 SELECT_ROLE = 1
 CONFIRMATION = 2
-
-# ------------------ User Data Storage ------------------
-
-# User data storage: username (lowercase) -> user_id
-USER_DATA_FILE = Path('user_data.json')
-
-# Load existing user data if the file exists
-if USER_DATA_FILE.exists():
-    with open(USER_DATA_FILE, 'r') as f:
-        try:
-            user_data_store = json.load(f)
-            # Convert keys to lowercase to maintain consistency
-            user_data_store = {k.lower(): v for k, v in user_data_store.items()}
-            logger.info("Loaded existing user data from user_data.json.")
-        except json.JSONDecodeError:
-            user_data_store = {}
-            logger.error("user_data.json is not a valid JSON file. Starting with an empty data store.")
-else:
-    user_data_store = {}
-
-def save_user_data():
-    """Save the user_data_store to a JSON file."""
-    try:
-        with open(USER_DATA_FILE, 'w') as f:
-            json.dump(user_data_store, f)
-            logger.info("Saved user data to user_data.json.")
-    except Exception as e:
-        logger.error(f"Failed to save user data: {e}")
-
-def get_user_roles(user_id):
-    """Determine all roles of a user based on their user ID."""
-    roles = []
-    for role, ids in ROLE_MAP.items():
-        if user_id in ids:
-            roles.append(role)
-    return roles
 
 # ------------------ Mute Functionality ------------------
 
@@ -397,7 +347,7 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
             target_ids = set()
             for role in target_roles:
-                target_ids.update(ROLE_MAP.get(role, []))
+                target_ids.update(list_users_with_role(role))
             target_ids.discard(pending_message.from_user.id)
 
             logger.debug(f"Selected role '{selected_role}' targets user IDs: {target_ids}")
@@ -441,7 +391,7 @@ async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TY
     """Trigger function when a Tara team member sends a specific user command."""
     try:
         user_id = update.message.from_user.id
-        roles = get_user_roles(user_id)
+        roles = get_roles(user_id)
 
         if 'tara_team' not in roles:
             await update.message.reply_text("You are not authorized to use this command.")
@@ -456,7 +406,12 @@ async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TY
             return ConversationHandler.END
 
         target_username = match.group(1).lower()
-        target_user_id = user_data_store.get(target_username)
+        target_user_id = None
+        # Find the user ID by username
+        for uid, roles in user_roles.items():
+            if any(uname.lower() == target_username for uname in roles):
+                target_user_id = uid
+                break
 
         if not target_user_id:
             await update.message.reply_text(f"User `@{target_username}` not found.", parse_mode='Markdown')
@@ -481,7 +436,7 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
     """Trigger function when a Tara team member sends a specific team command."""
     try:
         user_id = update.message.from_user.id
-        roles = get_user_roles(user_id)
+        roles = get_roles(user_id)
 
         if 'tara_team' not in roles:
             await update.message.reply_text("You are not authorized to use this command.")
@@ -514,47 +469,59 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the -team trigger to send a message to the user's team and Tara Team."""
     try:
         user_id = update.message.from_user.id
-        roles = get_user_roles(user_id)
+        roles = get_roles(user_id)
 
         if not roles:
             await update.message.reply_text("You don't have a role assigned to use this bot.")
             logger.warning(f"User {user_id} attempted to use -team without a role.")
             return ConversationHandler.END
 
-        # Assuming single role per user for simplicity
-        selected_role = roles[0]
-        context.bot_data['sender_role'] = selected_role
+        # Assuming users can have multiple roles
+        if len(roles) > 1:
+            # Prompt the user to select a role
+            context.bot_data['pending_message'] = update.message
+            keyboard = get_role_selection_keyboard(roles)
+            await update.message.reply_text(
+                "You have multiple roles. Please choose which role you want to use to send this message:",
+                reply_markup=keyboard
+            )
+            logger.info(f"User {user_id} has multiple roles and is prompted to select one.")
+            return SELECT_ROLE
+        else:
+            # User has a single role, proceed to confirmation
+            selected_role = roles[0]
+            context.bot_data['sender_role'] = selected_role
 
-        # Determine target roles: user's own role and Tara Team
-        target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
+            # Determine target roles: user's own role and Tara Team
+            target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
 
-        # Log the target roles for debugging
-        logger.debug(f"Selected role '{selected_role}' targets roles: {target_roles}")
+            # Log the target roles for debugging
+            logger.debug(f"Selected role '{selected_role}' targets roles: {target_roles}")
 
-        # Determine target user IDs
-        target_ids = set()
-        for role in target_roles:
-            target_ids.update(ROLE_MAP.get(role, []))
-        target_ids.discard(user_id)  # Prevent sending to self if necessary
+            # Determine target user IDs
+            target_ids = set()
+            for role in target_roles:
+                target_ids.update(list_users_with_role(role))
+            target_ids.discard(user_id)  # Prevent sending to self if necessary
 
-        logger.debug(f"Target user IDs for role '{selected_role}': {target_ids}")
+            logger.debug(f"Target user IDs for role '{selected_role}': {target_ids}")
 
-        if not target_ids:
-            await update.message.reply_text("No recipients found to send your message.")
-            logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
-            return ConversationHandler.END
+            if not target_ids:
+                await update.message.reply_text("No recipients found to send your message.")
+                logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
+                return ConversationHandler.END
 
-        # Store the message and targets for confirmation
-        messages_to_send = [update.message]
-        target_ids = list(target_ids)
-        sender_role = selected_role
+            # Store the message and targets for confirmation
+            messages_to_send = [update.message]
+            target_ids = list(target_ids)
+            sender_role = selected_role
 
-        # Send confirmation using UUID
-        await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
+            # Send confirmation using UUID
+            await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
 
-        logger.info(f"User {user_id} is sending a message to roles {target_roles}.")
+            logger.info(f"User {user_id} is sending a message to roles {target_roles}.")
 
-        return CONFIRMATION
+            return CONFIRMATION
 
     except Exception as e:
         logger.error(f"Error in team_trigger: {e}")
@@ -565,7 +532,7 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the -t trigger to send a message to Tara team."""
     try:
         user_id = update.message.from_user.id
-        roles = get_user_roles(user_id)
+        roles = get_roles(user_id)
 
         if not roles:
             await update.message.reply_text("You don't have a role assigned to use this bot.")
@@ -577,7 +544,7 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.bot_data['sender_role'] = selected_role
 
         target_roles = ['tara_team']
-        target_ids = set(ROLE_MAP.get('tara_team', []))
+        target_ids = set(list_users_with_role('tara_team'))
         target_ids.discard(user_id)
 
         logger.debug(f"Target roles for -t: {target_roles}")
@@ -624,16 +591,13 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         # Store the username and user_id if username exists
         if username:
             username_lower = username.lower()
-            previous_id = user_data_store.get(username_lower)
-            if previous_id != user_id:
-                # Update if the user_id has changed
-                user_data_store[username_lower] = user_id
-                logger.info(f"Stored/Updated username '{username_lower}' for user ID {user_id}.")
-                save_user_data()
+            # Note: Assuming role_master.py handles username-role mapping
+            # If additional mapping is needed, implement here
+            logger.info(f"User {user_id} with username '@{username_lower}' sent a message.")
         else:
             logger.info(f"User {user_id} has no username and cannot be targeted.")
 
-        roles = get_user_roles(user_id)
+        roles = get_roles(user_id)
 
         if not roles:
             await message.reply_text("You don't have a role assigned to use this bot.")
@@ -657,10 +621,11 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
             selected_role = roles[0]
             context.bot_data['sender_role'] = selected_role
 
+            # Determine target roles: user's own role and Tara Team
             target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
             target_ids = set()
             for role in target_roles:
-                target_ids.update(ROLE_MAP.get(role, []))
+                target_ids.update(list_users_with_role(role))
             target_ids.discard(user_id)
 
             logger.debug(f"Selected role '{selected_role}' targets user IDs: {target_ids}")
@@ -701,20 +666,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"User {user.id} has no username and cannot be targeted.")
             return
 
-        # Store the username and user_id
-        username_lower = user.username.lower()
-        user_data_store[username_lower] = user.id
-        logger.info(f"User {user.id} with username '{username_lower}' started the bot.")
-
-        # Save to JSON file
-        save_user_data()
-
-        display_name = get_display_name(user)
-
+        # Optionally, assign a default role or prompt the user to select roles
         await update.message.reply_text(
-            f"Hello, {display_name}! Welcome to the Team Communication Bot.\n\n"
+            f"Hello, {get_display_name(user)}! Welcome to the Team Communication Bot.\n\n"
             "Feel free to send messages using the available commands."
         )
+        logger.info(f"User {user.id} started the bot.")
+
     except Exception as e:
         logger.error(f"Error in start handler: {e}")
         await update.message.reply_text("An error occurred while starting the bot. Please try again later.")
@@ -723,20 +681,26 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all stored usernames and their user IDs. Restricted to Tara Team."""
     try:
         user_id = update.message.from_user.id
-        roles = get_user_roles(user_id)
+        roles = get_roles(user_id)
 
         if 'tara_team' not in roles:
             await update.message.reply_text("You are not authorized to use this command.")
             logger.warning(f"Unauthorized access attempt by user {user_id} for /listusers.")
             return
 
-        if not user_data_store:
-            await update.message.reply_text("No users have interacted with the bot yet.")
+        # List all users and their roles
+        if not user_roles:
+            await update.message.reply_text("No users have been assigned roles yet.")
             return
 
-        user_list = "\n".join([f"@{username}: {uid}" for username, uid in user_data_store.items()])
-        await update.message.reply_text(f"**Registered Users:**\n{user_list}", parse_mode='Markdown')
-        logger.info(f"User {user_id} requested the list of users.")
+        user_list = []
+        for uid, roles in user_roles.items():
+            display_names = [ROLE_DISPLAY_NAMES.get(role, role.capitalize()) for role in roles]
+            user_list.append(f"User ID {uid}: {', '.join(display_names)}")
+
+        user_list_text = "\n".join(user_list)
+        await update.message.reply_text(f"**Registered Users and Roles:**\n{user_list_text}", parse_mode='Markdown')
+        logger.info(f"User {user_id} requested the list of users and roles.")
     except Exception as e:
         logger.error(f"Error in list_users handler: {e}")
         await update.message.reply_text("An error occurred while listing users. Please try again later.")
@@ -747,7 +711,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         help_text = (
             "📘 *Available Commands:*\n\n"
             "/start - Initialize interaction with the bot.\n"
-            "/listusers - List all registered users (Tara Team only).\n"
+            "/listusers - List all registered users and their roles (Tara Team only).\n"
             "/help - Show this help message.\n"
             "/refresh - Refresh your user information.\n"
             "/cancel - Cancel the current operation.\n\n"
@@ -790,17 +754,12 @@ async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"User {user.id} has no username and cannot be refreshed.")
             return
 
-        # Store the username and user_id
-        username_lower = user.username.lower()
-        user_data_store[username_lower] = user.id
-        logger.info(f"User {user.id} with username '{username_lower}' refreshed their info.")
-
-        # Save to JSON file
-        save_user_data()
-
+        # Update user roles or perform any necessary refresh operations
         await update.message.reply_text(
             "Your information has been refreshed successfully."
         )
+        logger.info(f"User {user.id} refreshed their information.")
+
     except Exception as e:
         logger.error(f"Error in refresh handler: {e}")
         await update.message.reply_text("An error occurred while refreshing your information. Please try again later.")
@@ -811,7 +770,7 @@ async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /mute command for Tara Team."""
     try:
         user_id = update.message.from_user.id
-        roles = get_user_roles(user_id)
+        roles = get_roles(user_id)
 
         # Restrict to Tara Team only
         if 'tara_team' not in roles:
@@ -849,9 +808,9 @@ async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             # Attempt to get the username of the target user
             target_username = None
-            for uname, uid in user_data_store.items():
-                if uid == target_user_id:
-                    target_username = uname
+            for uid, roles in user_roles.items():
+                if 'tara_team' in roles:  # Assuming user_roles maps user_id to roles
+                    target_username = '@' + next((uname for uname in ROLE_DISPLAY_NAMES if uname == 'tara_team'), 'User')
                     break
 
             if target_username:
@@ -873,7 +832,7 @@ async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /unmuteid command for Tara Team."""
     try:
         user_id = update.message.from_user.id
-        roles = get_user_roles(user_id)
+        roles = get_roles(user_id)
 
         # Restrict to Tara Team only
         if 'tara_team' not in roles:
@@ -897,9 +856,9 @@ async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # Attempt to get the username of the target user
             target_username = None
-            for uname, uid in user_data_store.items():
-                if uid == target_user_id:
-                    target_username = uname
+            for uid, roles in user_roles.items():
+                if 'tara_team' in roles:  # Assuming user_roles maps user_id to roles
+                    target_username = '@' + next((uname for uname in ROLE_DISPLAY_NAMES if uname == 'tara_team'), 'User')
                     break
 
             if target_username:
@@ -920,7 +879,7 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Handle the /listmuted command for Tara Team."""
     try:
         user_id = update.message.from_user.id
-        roles = get_user_roles(user_id)
+        roles = get_roles(user_id)
 
         if 'tara_team' not in roles:
             await update.message.reply_text("You are not authorized to use this command.")
@@ -933,15 +892,13 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         muted_list = []
         for uid in muted_users:
-            username = None
-            for uname, id_ in user_data_store.items():
-                if id_ == uid:
-                    username = uname
-                    break
-            if username:
-                muted_list.append(f"@{username} (ID: {uid})")
+            # Retrieve roles to identify usernames
+            user_roles = get_roles(uid)
+            if 'tara_team' in user_roles:
+                username = '@tara_team'  # Placeholder; adjust as needed
             else:
-                muted_list.append(f"ID: {uid}")
+                username = f"User ID {uid}"
+            muted_list.append(f"{username} (ID: {uid})")
 
         muted_users_text = "\n".join(muted_list)
         await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
@@ -1039,9 +996,6 @@ def main():
     try:
         # Build the application
         application = ApplicationBuilder().token(BOT_TOKEN).build()
-
-        # Initialize bot_data storage for pending media groups
-        application.bot_data['pending_media_groups'] = defaultdict(list)
 
         # Add command handlers
         application.add_handler(CommandHandler('start', start))
