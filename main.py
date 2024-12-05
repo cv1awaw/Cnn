@@ -6,7 +6,6 @@ import re
 import json
 import uuid
 from pathlib import Path
-from collections import defaultdict
 from functools import wraps
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -31,13 +30,14 @@ from role_master import (
     is_role_master,
 )
 import username_mapping
+from decorators import role_master_only  # Ensure decorators.py is in the same directory
 
 # ------------------ Setup Logging ------------------
 
 # Enable logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.DEBUG  # Set to DEBUG for detailed logs
+    level=logging.INFO  # Set to INFO to reduce verbosity
 )
 logger = logging.getLogger(__name__)
 
@@ -52,22 +52,21 @@ ROLE_DISPLAY_NAMES = {
     'design_team': 'Design Team',
     'king_team': 'Admin Team',
     'tara_team': 'Tara Team',
-    'mind_map_form_creator': 'Mind Map & Form Creation Team',  # Newly added
+    'mind_map_form_creator': 'Mind Map & Form Creation Team',
 }
 
 # Define trigger to target roles mapping
 TRIGGER_TARGET_MAP = {
     '-w': ['writer'],
-    '-e': ['checker_team'],          # Editor Team
+    '-e': ['checker_team'],
     '-mcq': ['mcqs_team'],
     '-d': ['word_team'],
     '-de': ['design_team'],
     '-mf': ['mind_map_form_creator'],
-    '-c': ['checker_team'],          # Newly added trigger for Checker Team
+    '-c': ['checker_team'],
 }
 
 # Define target roles for each role based on user requirements
-# **Updated to include only sender's role and 'tara_team'**
 SENDING_ROLE_TARGETS = {
     'writer': ['writer', 'tara_team'],
     'mcqs_team': ['mcqs_team', 'tara_team'],
@@ -79,7 +78,7 @@ SENDING_ROLE_TARGETS = {
         'writer', 'mcqs_team', 'checker_team',
         'word_team', 'design_team', 'king_team', 'tara_team'
     ],
-    'mind_map_form_creator': ['mind_map_form_creator', 'tara_team'],  # Assuming only Tara Team
+    'mind_map_form_creator': ['mind_map_form_creator', 'tara_team'],
 }
 
 # ------------------ Define Conversation States ------------------
@@ -89,7 +88,7 @@ CONFIRMATION = 2
 
 # ------------------ Mute Functionality ------------------
 
-# Mute data storage: list of muted user IDs
+# Mute data storage: set of muted user IDs
 MUTED_USERS_FILE = Path('muted_users.json')
 
 # Load existing muted users if the file exists
@@ -97,34 +96,22 @@ if MUTED_USERS_FILE.exists():
     with open(MUTED_USERS_FILE, 'r') as f:
         try:
             muted_users = set(json.load(f))
-            logger.info("Loaded existing muted users from muted_users.json.")
+            logger.info("✅ Loaded existing muted users from muted_users.json.")
         except json.JSONDecodeError:
             muted_users = set()
-            logger.error("muted_users.json is not a valid JSON file. Starting with an empty muted users set.")
+            logger.error("❌ muted_users.json is not a valid JSON file. Starting with an empty muted users set.")
 else:
     muted_users = set()
+    logger.info("🔍 muted_users.json not found. Starting with an empty muted users set.")
 
 def save_muted_users():
     """Save the muted_users set to a JSON file."""
     try:
         with open(MUTED_USERS_FILE, 'w') as f:
             json.dump(list(muted_users), f)
-            logger.info("Saved muted users to muted_users.json.")
+            logger.info("💾 Saved muted users to muted_users.json.")
     except Exception as e:
-        logger.error(f"Failed to save muted users: {e}")
-
-# ------------------ Access Control Decorator ------------------
-
-def restricted(func):
-    @wraps(func)
-    async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        user_id = update.effective_user.id
-        if not is_role_master(user_id):
-            await update.message.reply_text("You are not authorized to use this command.")
-            logger.warning(f"Unauthorized access attempt by user {user_id} to command {func.__name__}.")
-            return
-        return await func(update, context, *args, **kwargs)
-    return wrapped
+        logger.error(f"❌ Failed to save muted users: {e}")
 
 # ------------------ Helper Functions ------------------
 
@@ -179,9 +166,9 @@ async def forward_messages(bot, messages, target_ids, sender_role):
                             text=f"{caption}\n\n{msg.text}",
                             parse_mode='Markdown'
                         )
-                        logger.info(f"Forwarded text message to {user_id}")
+                        logger.info(f"📤 Forwarded text message to {user_id}")
                     except Exception as e:
-                        logger.error(f"Failed to forward text message to {user_id}: {e}")
+                        logger.error(f"❌ Failed to forward text message to {user_id}: {e}")
             else:
                 # Handle other message types if necessary
                 pass
@@ -193,11 +180,11 @@ async def forward_messages(bot, messages, target_ids, sender_role):
                         chat_id=user_id,
                         media=media_group
                     )
-                    logger.info(f"Forwarded media group to {user_id}")
+                    logger.info(f"📤 Forwarded media group to {user_id}")
                 except Exception as e:
-                    logger.error(f"Failed to forward media group to {user_id}: {e}")
+                    logger.error(f"❌ Failed to forward media group to {user_id}: {e}")
     except Exception as e:
-        logger.error(f"Error in forward_messages: {e}")
+        logger.error(f"❌ Error in forward_messages: {e}")
 
 async def send_confirmation(messages, context, sender_role, target_ids, target_roles=None):
     """Send a confirmation message with inline buttons for a group of documents or text."""
@@ -205,11 +192,11 @@ async def send_confirmation(messages, context, sender_role, target_ids, target_r
         # Determine the content description
         if any(msg.document for msg in messages):
             document_names = [f"`{msg.document.file_name}`" for msg in messages if msg.document]
-            content_description = f"PDF Documents: {', '.join(document_names)}"
+            content_description = f"📄 PDF Documents: {', '.join(document_names)}"
         elif all(msg.text for msg in messages):
-            content_description = f"{len(messages)} Text Message(s)"
+            content_description = f"✉️ {len(messages)} Text Message(s)"
         else:
-            content_description = "Unsupported message types."
+            content_description = "⚠️ Unsupported message types."
 
         if target_roles:
             target_roles_display = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
@@ -219,7 +206,7 @@ async def send_confirmation(messages, context, sender_role, target_ids, target_r
         confirmation_text = (
             f"📩 *You are about to send the following to **{', '.join(target_roles_display)}**:*\n\n"
             f"{content_description}\n\n"
-            "Do you want to send this?"
+            "❓ Do you want to send this?"
         )
 
         # Generate a unique UUID for this confirmation
@@ -245,10 +232,10 @@ async def send_confirmation(messages, context, sender_role, target_ids, target_r
             'target_roles': target_roles if target_roles else SENDING_ROLE_TARGETS.get(sender_role, [])
         }
 
-        logger.debug(f"Sent confirmation with UUID {confirmation_uuid} to user {messages[0].from_user.id}")
+        logger.debug(f"📨 Sent confirmation with UUID {confirmation_uuid} to user {messages[0].from_user.id}")
 
     except Exception as e:
-        logger.error(f"Error in send_confirmation: {e}")
+        logger.error(f"❌ Error in send_confirmation: {e}")
 
 # ------------------ Handler Functions ------------------
 
@@ -257,12 +244,12 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if update.callback_query:
             await update.callback_query.answer()
-            await update.callback_query.edit_message_text("Operation cancelled.")
+            await update.callback_query.edit_message_text("🛑 Operation cancelled.")
         else:
-            await update.message.reply_text("Operation cancelled.")
+            await update.message.reply_text("🛑 Operation cancelled.")
         logger.info(f"User {update.effective_user.id} cancelled the operation.")
     except Exception as e:
-        logger.error(f"Error in cancel handler: {e}")
+        logger.error(f"❌ Error in cancel handler: {e}")
     return ConversationHandler.END
 
 async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -272,21 +259,21 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.answer()
         data = query.data
 
-        logger.debug(f"Received confirmation callback data: {data}")
+        logger.debug(f"🔄 Received confirmation callback data: {data}")
 
         if data.startswith('confirm:') or data.startswith('cancel:'):
             try:
                 action, confirmation_uuid = data.split(':', 1)
             except ValueError:
-                await query.edit_message_text("Invalid confirmation data. Please try again.")
-                logger.error("Failed to parse confirmation data.")
+                await query.edit_message_text("⚠️ Invalid confirmation data. Please try again.")
+                logger.error("❌ Failed to parse confirmation data.")
                 return ConversationHandler.END
 
             confirm_data = context.bot_data.get(f'confirm_{confirmation_uuid}')
 
             if not confirm_data:
-                await query.edit_message_text("An error occurred. Please try again.")
-                logger.error(f"No confirmation data found for UUID {confirmation_uuid}.")
+                await query.edit_message_text("⚠️ An error occurred. Please try again.")
+                logger.error(f"❌ No confirmation data found for UUID {confirmation_uuid}.")
                 return ConversationHandler.END
 
             if action == 'confirm':
@@ -326,7 +313,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 del context.bot_data[f'confirm_{confirmation_uuid}']
 
             elif action == 'cancel':
-                await query.edit_message_text("Operation cancelled.")
+                await query.edit_message_text("🛑 Operation cancelled.")
                 logger.info(f"User {query.from_user.id} cancelled the message sending for UUID {confirmation_uuid}.")
 
                 # Clean up the stored data
@@ -334,12 +321,12 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                     del context.bot_data[f'confirm_{confirmation_uuid}']
 
         else:
-            await query.edit_message_text("Invalid choice.")
+            await query.edit_message_text("⚠️ Invalid choice.")
             logger.warning(f"User {query.from_user.id} sent invalid confirmation choice: {data}")
 
     except Exception as e:
-        logger.error(f"Error in confirmation_handler: {e}")
-        await query.edit_message_text("An error occurred. Please try again later.")
+        logger.error(f"❌ Error in confirmation_handler: {e}")
+        await query.edit_message_text("❌ An error occurred. Please try again later.")
     return ConversationHandler.END
 
 async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -349,7 +336,7 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.answer()
         data = query.data
 
-        logger.debug(f"Received role selection callback data: {data}")
+        logger.debug(f"🔄 Received role selection callback data: {data}")
 
         if data.startswith('role:'):
             selected_role = data.split(':', 1)[1]
@@ -358,8 +345,8 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             # Retrieve the pending message
             pending_message = context.bot_data.get('pending_message')
             if not pending_message:
-                await query.edit_message_text("No pending messages found. Please try again.")
-                logger.error("No pending message found during role selection.")
+                await query.edit_message_text("⚠️ No pending messages found. Please try again.")
+                logger.error("❌ No pending message found during role selection.")
                 return ConversationHandler.END
 
             # Determine target_ids based on selected_role
@@ -369,11 +356,11 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 target_ids.update(list_users_with_role(role))
             target_ids.discard(pending_message.from_user.id)
 
-            logger.debug(f"Selected role '{selected_role}' targets user IDs: {target_ids}")
+            logger.debug(f"🔑 Selected role '{selected_role}' targets user IDs: {target_ids}")
 
             if not target_ids:
-                await query.edit_message_text("No recipients found to send your message.")
-                logger.warning(f"No recipients found for user {pending_message.from_user.id} with role '{selected_role}'.")
+                await query.edit_message_text("⚠️ No recipients found to send your message.")
+                logger.warning(f"⚠️ No recipients found for user {pending_message.from_user.id} with role '{selected_role}'.")
                 return ConversationHandler.END
 
             # Store the message and targets for confirmation
@@ -384,7 +371,7 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             # Send confirmation using UUID
             await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
 
-            await query.edit_message_text("Processing your message...")
+            await query.edit_message_text("🕒 Processing your message...")
             logger.info(f"User {query.from_user.id} selected role '{selected_role}' and is prompted for confirmation.")
 
             # Remove the pending message from bot_data
@@ -393,17 +380,17 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             return CONFIRMATION
 
         elif data == 'cancel_role_selection':
-            await query.edit_message_text("Operation cancelled.")
+            await query.edit_message_text("🛑 Operation cancelled.")
             logger.info(f"User {query.from_user.id} cancelled role selection.")
             return ConversationHandler.END
         else:
-            await query.edit_message_text("Invalid role selection.")
+            await query.edit_message_text("⚠️ Invalid role selection.")
             logger.warning(f"User {query.from_user.id} sent invalid role selection: {data}")
             return ConversationHandler.END
 
     except Exception as e:
-        logger.error(f"Error in select_role_handler: {e}")
-        await query.edit_message_text("An error occurred. Please try again later.")
+        logger.error(f"❌ Error in select_role_handler: {e}")
+        await query.edit_message_text("❌ An error occurred. Please try again later.")
         return ConversationHandler.END
 
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -413,37 +400,43 @@ async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TY
         roles = get_roles(user_id)
 
         if 'tara_team' not in roles and not is_role_master(user_id):
-            await update.message.reply_text("You are not authorized to use this command.")
+            await update.message.reply_text("🚫 You are not authorized to use this command.")
             logger.warning(f"Unauthorized access attempt by user {user_id} for specific user triggers.")
             return ConversationHandler.END
 
         # Extract username from the command using regex
         match = re.match(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', update.message.text, re.IGNORECASE)
         if not match:
-            await update.message.reply_text("Invalid format. Please use `-@username` to target a user.", parse_mode='Markdown')
-            logger.warning(f"Invalid user command format from user {user_id}.")
+            await update.message.reply_text("⚠️ Invalid format. Please use `-@username` to target a user.", parse_mode='Markdown')
+            logger.warning(f"⚠️ Invalid user command format from user {user_id}.")
             return ConversationHandler.END
 
         target_username = match.group(1).lower()
         target_user_id = username_mapping.get_user_id(target_username)
 
         if not target_user_id:
-            await update.message.reply_text(f"User `@{target_username}` not found.", parse_mode='Markdown')
+            await update.message.reply_text(f"❌ User `@{target_username}` not found.", parse_mode='Markdown')
             logger.warning(f"Role Master {user_id} attempted to target non-existent user @{target_username}.")
+            return ConversationHandler.END
+
+        # Prevent Role Masters from sending messages to themselves via specific user trigger
+        if target_user_id == user_id:
+            await update.message.reply_text("⚠️ You cannot send messages to yourself using this command.")
+            logger.warning(f"Role Master {user_id} attempted to send a message to themselves.")
             return ConversationHandler.END
 
         # Store target user ID and other necessary data in bot_data
         context.bot_data['target_user_id'] = target_user_id
         context.bot_data['target_username'] = target_username
-        context.bot_data['sender_role'] = 'tara_team'  # Tara Team is sending the message
+        context.bot_data['sender_role'] = 'tara_team'  # Assuming Role Masters use 'tara_team' role for specific user commands
 
-        await update.message.reply_text(f"Write your message for user `@{target_username}`.", parse_mode='Markdown')
-        logger.info(f"User {user_id} is sending a message to user @{target_username} (ID: {target_user_id}).")
+        await update.message.reply_text(f"✍️ Write your message for user `@{target_username}`.", parse_mode='Markdown')
+        logger.info(f"Role Master {user_id} is sending a message to user @{target_username} (ID: {target_user_id}).")
         return CONFIRMATION
 
     except Exception as e:
-        logger.error(f"Error in specific_user_trigger: {e}")
-        await update.message.reply_text("An error occurred. Please try again later.")
+        logger.error(f"❌ Error in specific_user_trigger: {e}")
+        await update.message.reply_text("❌ An error occurred. Please try again later.")
         return ConversationHandler.END
 
 async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -453,7 +446,7 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
         roles = get_roles(user_id)
 
         if 'tara_team' not in roles and not is_role_master(user_id):
-            await update.message.reply_text("You are not authorized to use this command.")
+            await update.message.reply_text("🚫 You are not authorized to use this command.")
             logger.warning(f"Unauthorized access attempt by user {user_id} for specific team triggers.")
             return ConversationHandler.END
 
@@ -462,21 +455,21 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
         target_roles = TRIGGER_TARGET_MAP.get(message)
 
         if not target_roles:
-            await update.message.reply_text("Invalid trigger. Please try again.")
-            logger.warning(f"Invalid trigger '{message}' from user {user_id}.")
+            await update.message.reply_text("⚠️ Invalid trigger. Please try again.")
+            logger.warning(f"⚠️ Invalid trigger '{message}' from user {user_id}.")
             return ConversationHandler.END
 
         # Store target roles in bot_data
         context.bot_data['specific_target_roles'] = target_roles
-        context.bot_data['sender_role'] = 'tara_team'  # Tara Team is sending the message
+        context.bot_data['sender_role'] = 'tara_team'  # Assuming Role Masters use 'tara_team' role for specific team commands
 
-        await update.message.reply_text("Write your message for your team.")
-        logger.info(f"User {user_id} is sending a message to roles {target_roles}.")
+        await update.message.reply_text("✍️ Write your message for your team.")
+        logger.info(f"Role Master {user_id} is sending a message to roles {target_roles}.")
         return CONFIRMATION
 
     except Exception as e:
-        logger.error(f"Error in specific_team_trigger: {e}")
-        await update.message.reply_text("An error occurred. Please try again later.")
+        logger.error(f"❌ Error in specific_team_trigger: {e}")
+        await update.message.reply_text("❌ An error occurred. Please try again later.")
         return ConversationHandler.END
 
 async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -486,8 +479,8 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         roles = get_roles(user_id)
 
         if not roles:
-            await update.message.reply_text("You don't have a role assigned to use this bot.")
-            logger.warning(f"User {user_id} attempted to use -team without a role.")
+            await update.message.reply_text("⚠️ You don't have a role assigned to use this bot.")
+            logger.warning(f"⚠️ User {user_id} attempted to use -team without a role.")
             return ConversationHandler.END
 
         # Assuming users can have multiple roles
@@ -496,7 +489,7 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.bot_data['pending_message'] = update.message
             keyboard = get_role_selection_keyboard(roles)
             await update.message.reply_text(
-                "You have multiple roles. Please choose which role you want to use to send this message:",
+                "🔀 You have multiple roles. Please choose which role you want to use to send this message:",
                 reply_markup=keyboard
             )
             logger.info(f"User {user_id} has multiple roles and is prompted to select one.")
@@ -510,7 +503,7 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
 
             # Log the target roles for debugging
-            logger.debug(f"Selected role '{selected_role}' targets roles: {target_roles}")
+            logger.debug(f"🔑 Selected role '{selected_role}' targets roles: {target_roles}")
 
             # Determine target user IDs
             target_ids = set()
@@ -518,11 +511,11 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 target_ids.update(list_users_with_role(role))
             target_ids.discard(user_id)  # Prevent sending to self if necessary
 
-            logger.debug(f"Target user IDs for role '{selected_role}': {target_ids}")
+            logger.debug(f"🔍 Target user IDs for role '{selected_role}': {target_ids}")
 
             if not target_ids:
-                await update.message.reply_text("No recipients found to send your message.")
-                logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
+                await update.message.reply_text("⚠️ No recipients found to send your message.")
+                logger.warning(f"⚠️ No recipients found for user {user_id} with role '{selected_role}'.")
                 return ConversationHandler.END
 
             # Store the message and targets for confirmation
@@ -533,13 +526,13 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Send confirmation using UUID
             await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
 
-            logger.info(f"User {user_id} is sending a message to roles {target_roles}.")
+            logger.info(f"📤 User {user_id} is sending a message to roles {target_roles}.")
 
             return CONFIRMATION
 
     except Exception as e:
-        logger.error(f"Error in team_trigger: {e}")
-        await update.message.reply_text("An error occurred. Please try again later.")
+        logger.error(f"❌ Error in team_trigger: {e}")
+        await update.message.reply_text("❌ An error occurred. Please try again later.")
         return ConversationHandler.END
 
 async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -549,8 +542,8 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         roles = get_roles(user_id)
 
         if not roles:
-            await update.message.reply_text("You don't have a role assigned to use this bot.")
-            logger.warning(f"User {user_id} attempted to use -t without a role.")
+            await update.message.reply_text("⚠️ You don't have a role assigned to use this bot.")
+            logger.warning(f"⚠️ User {user_id} attempted to use -t without a role.")
             return ConversationHandler.END
 
         # Store the user's role
@@ -561,12 +554,12 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_ids = set(list_users_with_role('tara_team'))
         target_ids.discard(user_id)
 
-        logger.debug(f"Target roles for -t: {target_roles}")
-        logger.debug(f"Target user IDs for -t: {target_ids}")
+        logger.debug(f"🔑 Target roles for -t: {target_roles}")
+        logger.debug(f"🔍 Target user IDs for -t: {target_ids}")
 
         if not target_ids:
-            await update.message.reply_text("No recipients found to send your message.")
-            logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
+            await update.message.reply_text("⚠️ No recipients found to send your message.")
+            logger.warning(f"⚠️ No recipients found for user {user_id} with role '{selected_role}'.")
             return ConversationHandler.END
 
         # Store the message and targets for confirmation
@@ -577,13 +570,13 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Send confirmation using UUID
         await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
 
-        logger.info(f"User {user_id} is sending a message to Tara Team.")
+        logger.info(f"📤 User {user_id} is sending a message to Tara Team.")
 
         return CONFIRMATION
 
     except Exception as e:
-        logger.error(f"Error in tara_trigger: {e}")
-        await update.message.reply_text("An error occurred. Please try again later.")
+        logger.error(f"❌ Error in tara_trigger: {e}")
+        await update.message.reply_text("❌ An error occurred. Please try again later.")
         return ConversationHandler.END
 
 async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -598,8 +591,8 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
 
         # Check if the user is muted
         if user_id in muted_users:
-            await message.reply_text("You have been muted and cannot send messages through this bot.")
-            logger.info(f"Muted user {user_id} attempted to send a message.")
+            await message.reply_text("⛔ You have been muted and cannot send messages through this bot.")
+            logger.info(f"⛔ Muted user {user_id} attempted to send a message.")
             return ConversationHandler.END
 
         # Store the username and user_id if username exists
@@ -607,28 +600,28 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
             username_lower = username.lower()
             # Add or update username mapping
             username_mapping.add_username(username, user_id)
-            logger.info(f"User {user_id} with username '@{username_lower}' sent a message.")
+            logger.info(f"👤 User {user_id} with username '@{username_lower}' sent a message.")
         else:
-            logger.info(f"User {user_id} has no username and cannot be targeted.")
+            logger.info(f"👤 User {user_id} has no username and cannot be targeted.")
 
         roles = get_roles(user_id)
 
         if not roles:
-            await message.reply_text("You don't have a role assigned to use this bot.")
-            logger.warning(f"Unauthorized access attempt by user {user_id}")
+            await message.reply_text("⚠️ You don't have a role assigned to use this bot.")
+            logger.warning(f"⚠️ Unauthorized access attempt by user {user_id}.")
             return ConversationHandler.END
 
-        logger.info(f"Received message from user {user_id} with roles '{roles}'")
+        logger.info(f"📥 Received message from user {user_id} with roles '{roles}'")
 
         if len(roles) > 1:
             # User has multiple roles, prompt to choose one
             context.bot_data['pending_message'] = message
             keyboard = get_role_selection_keyboard(roles)
             await message.reply_text(
-                "You have multiple roles. Please choose which role you want to use to send this message:",
+                "🔀 You have multiple roles. Please choose which role you want to use to send this message:",
                 reply_markup=keyboard
             )
-            logger.info(f"User {user_id} has multiple roles and is prompted to select one.")
+            logger.info(f"🔄 User {user_id} has multiple roles and is prompted to select one.")
             return SELECT_ROLE
         else:
             # User has a single role, proceed to confirmation
@@ -642,33 +635,32 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
                 target_ids.update(list_users_with_role(role))
             target_ids.discard(user_id)
 
-            logger.debug(f"Selected role '{selected_role}' targets user IDs: {target_ids}")
+            logger.debug(f"🔑 Selected role '{selected_role}' targets user IDs: {target_ids}")
 
             if not target_ids:
-                await message.reply_text("No recipients found to send your message.")
-                logger.warning(f"No recipients found for user {user_id} with role '{selected_role}'.")
+                await message.reply_text("⚠️ No recipients found to send your message.")
+                logger.warning(f"⚠️ No recipients found for user {user_id} with role '{selected_role}'.")
                 return ConversationHandler.END
 
             # Store the message and targets for confirmation
             messages_to_send = [message]
             target_ids = list(target_ids)
-            target_roles = target_roles
             sender_role = selected_role
 
             # Send confirmation using UUID
             await send_confirmation(messages_to_send, context, sender_role, target_ids, target_roles=target_roles)
-            logger.info(f"User {user_id} is sending a message to roles {target_roles}.")
+            logger.info(f"📤 User {user_id} is sending a message to roles {target_roles}.")
 
             return CONFIRMATION
 
     except Exception as e:
-        logger.error(f"Error in handle_general_message: {e}")
-        await message.reply_text("An error occurred. Please try again later.")
+        logger.error(f"❌ Error in handle_general_message: {e}")
+        await message.reply_text("❌ An error occurred. Please try again later.")
         return ConversationHandler.END
 
 # ------------------ Command Handlers ------------------
 
-@restricted
+@role_master_only
 async def help_master(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Provide help information exclusive to Role Masters."""
     try:
@@ -679,70 +671,92 @@ async def help_master(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/list_role_masters - List all current Role Masters.\n"
             "/addrole <user_id> <role> - Assign a role to a user.\n"
             "/removerole <user_id> <role> - Remove a role from a user.\n"
-            "/help_master - Show this help message.\n\n"
+            "/mute [user_id] - Mute yourself or another user.\n"
+            "/muteid <user_id> - Mute a specific user by their ID.\n"
+            "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
+            "/listmuted - List all currently muted users.\n\n"
             "📌 *Notes:*\n"
             "- Only Role Masters can manage roles and Role Masters.\n"
             "- Roles include: writer, mcqs_team, checker_team, word_team, design_team, king_team, mind_map_form_creator, tara_team.\n"
             "- Use `/cancel` to cancel any ongoing operation."
         )
         await update.message.reply_text(help_text, parse_mode='Markdown')
-        logger.info(f"User {update.effective_user.id} accessed /help_master.")
+        logger.info(f"👓 User {update.effective_user.id} accessed /help_master.")
     except Exception as e:
-        logger.error(f"Error in help_master handler: {e}")
-        await update.message.reply_text("An error occurred while providing help. Please try again later.")
+        logger.error(f"❌ Error in help_master handler: {e}")
+        await update.message.reply_text("❌ An error occurred while providing help. Please try again later.")
 
-@restricted
+@role_master_only
 async def add_role_master_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Assign a Role Master to a user."""
     try:
         args = context.args
         if len(args) != 1:
-            await update.message.reply_text("Usage: /add_role_master <user_id>")
+            await update.message.reply_text("ℹ️ Usage: /add_role_master <user_id>")
             return
 
         target_user_id = int(args[0])
+        requester_user_id = update.effective_user.id
+
+        if target_user_id == requester_user_id:
+            await update.message.reply_text("ℹ️ You are already a Role Master.")
+            logger.info(f"Role Master {requester_user_id} attempted to reassign themselves as Role Master.")
+            return
 
         if add_role_master(target_user_id):
             # Optionally, assign a role to the Role Master if needed
-            await update.message.reply_text(f"User ID {target_user_id} has been promoted to Role Master.")
-            logger.info(f"Role Master {target_user_id} added by {update.effective_user.id}.")
+            target_username = username_mapping.get_username(target_user_id)
+            if target_username:
+                await update.message.reply_text(f"✅ User `{target_username}` (ID: {target_user_id}) has been promoted to Role Master.", parse_mode='Markdown')
+            else:
+                await update.message.reply_text(f"✅ User ID {target_user_id} has been promoted to Role Master.")
+            logger.info(f"Role Master {target_user_id} added by {requester_user_id}.")
         else:
-            await update.message.reply_text(f"User ID {target_user_id} is already a Role Master.")
+            await update.message.reply_text(f"ℹ️ User ID {target_user_id} is already a Role Master.")
     except ValueError:
-        await update.message.reply_text("Please provide a valid user ID.")
+        await update.message.reply_text("⚠️ Please provide a valid numerical user ID.")
     except Exception as e:
-        logger.error(f"Error in add_role_master_command handler: {e}")
-        await update.message.reply_text("An error occurred while adding a Role Master. Please try again later.")
+        logger.error(f"❌ Error in add_role_master_command: {e}")
+        await update.message.reply_text("❌ An error occurred while promoting the user. Please try again later.")
 
-@restricted
+@role_master_only
 async def remove_role_master_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Revoke Role Master from a user."""
     try:
         args = context.args
         if len(args) != 1:
-            await update.message.reply_text("Usage: /remove_role_master <user_id>")
+            await update.message.reply_text("ℹ️ Usage: /remove_role_master <user_id>")
             return
 
         target_user_id = int(args[0])
 
         if remove_role_master(target_user_id):
-            await update.message.reply_text(f"User ID {target_user_id} has been demoted from Role Master.")
+            target_username = username_mapping.get_username(target_user_id)
+            if target_username:
+                await update.message.reply_text(f"✅ User `{target_username}` (ID: {target_user_id}) has been demoted from Role Master.", parse_mode='Markdown')
+            else:
+                await update.message.reply_text(f"✅ User ID {target_user_id} has been demoted from Role Master.")
             logger.info(f"Role Master {target_user_id} removed by {update.effective_user.id}.")
         else:
-            await update.message.reply_text(f"User ID {target_user_id} is not a Role Master.")
+            # Check if the removal was denied due to being the last Role Master
+            if target_user_id in get_role_masters():
+                await update.message.reply_text("⚠️ Cannot remove the last Role Master to prevent lockout.")
+                logger.warning(f"⚠️ Attempt to remove the last Role Master {target_user_id} by {update.effective_user.id}.")
+            else:
+                await update.message.reply_text(f"ℹ️ User ID {target_user_id} is not a Role Master.")
     except ValueError:
-        await update.message.reply_text("Please provide a valid user ID.")
+        await update.message.reply_text("⚠️ Please provide a valid numerical user ID.")
     except Exception as e:
-        logger.error(f"Error in remove_role_master_command handler: {e}")
-        await update.message.reply_text("An error occurred while removing a Role Master. Please try again later.")
+        logger.error(f"❌ Error in remove_role_master_command: {e}")
+        await update.message.reply_text("❌ An error occurred while demoting the user. Please try again later.")
 
-@restricted
+@role_master_only
 async def list_role_masters_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all current Role Masters."""
     try:
         role_masters = get_role_masters()
         if not role_masters:
-            await update.message.reply_text("There are currently no Role Masters.")
+            await update.message.reply_text("ℹ️ There are currently no Role Masters.")
             return
 
         role_masters_list = []
@@ -754,11 +768,73 @@ async def list_role_masters_command(update: Update, context: ContextTypes.DEFAUL
                 role_masters_list.append(f"User ID {uid}")
 
         role_masters_text = "\n".join(role_masters_list)
-        await update.message.reply_text(f"**Current Role Masters:**\n{role_masters_text}", parse_mode='Markdown')
-        logger.info(f"User {update.effective_user.id} requested the list of Role Masters.")
+        await update.message.reply_text(f"**🔰 Current Role Masters:**\n{role_masters_text}", parse_mode='Markdown')
+        logger.info(f"🔰 User {update.effective_user.id} requested the list of Role Masters.")
     except Exception as e:
-        logger.error(f"Error in list_role_masters_command handler: {e}")
-        await update.message.reply_text("An error occurred while listing Role Masters. Please try again later.")
+        logger.error(f"❌ Error in list_role_masters_command: {e}")
+        await update.message.reply_text("❌ An error occurred while listing Role Masters. Please try again later.")
+
+@role_master_only
+async def add_role_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Assign a role to a user."""
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("ℹ️ Usage: /addrole <user_id> <role>")
+            return
+
+        target_user_id = int(args[0])
+        role = args[1].lower()
+
+        if role not in ROLE_DISPLAY_NAMES:
+            await update.message.reply_text(f"⚠️ Invalid role. Available roles: {', '.join(ROLE_DISPLAY_NAMES.keys())}")
+            return
+
+        if add_role(target_user_id, role):
+            target_username = username_mapping.get_username(target_user_id)
+            if target_username:
+                await update.message.reply_text(f"✅ Role '{ROLE_DISPLAY_NAMES.get(role, role)}' has been assigned to user `{target_username}` (ID: {target_user_id}).", parse_mode='Markdown')
+            else:
+                await update.message.reply_text(f"✅ Role '{ROLE_DISPLAY_NAMES.get(role, role)}' has been assigned to user ID {target_user_id}.")
+            logger.info(f"📝 Role '{role}' assigned to user ID {target_user_id} by Role Master {update.effective_user.id}.")
+        else:
+            await update.message.reply_text(f"ℹ️ User ID {target_user_id} already has the role '{ROLE_DISPLAY_NAMES.get(role, role)}'.")
+    except ValueError:
+        await update.message.reply_text("⚠️ Please provide a valid numerical user ID.")
+    except Exception as e:
+        logger.error(f"❌ Error in add_role_command handler: {e}")
+        await update.message.reply_text("❌ An error occurred while assigning the role. Please try again later.")
+
+@role_master_only
+async def remove_role_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove a role from a user."""
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("ℹ️ Usage: /removerole <user_id> <role>")
+            return
+
+        target_user_id = int(args[0])
+        role = args[1].lower()
+
+        if role not in ROLE_DISPLAY_NAMES:
+            await update.message.reply_text(f"⚠️ Invalid role. Available roles: {', '.join(ROLE_DISPLAY_NAMES.keys())}")
+            return
+
+        if remove_role(target_user_id, role):
+            target_username = username_mapping.get_username(target_user_id)
+            if target_username:
+                await update.message.reply_text(f"✅ Role '{ROLE_DISPLAY_NAMES.get(role, role)}' has been removed from user `{target_username}` (ID: {target_user_id}).", parse_mode='Markdown')
+            else:
+                await update.message.reply_text(f"✅ Role '{ROLE_DISPLAY_NAMES.get(role, role)}' has been removed from user ID {target_user_id}.")
+            logger.info(f"📝 Role '{role}' removed from user ID {target_user_id} by Role Master {update.effective_user.id}.")
+        else:
+            await update.message.reply_text(f"ℹ️ User ID {target_user_id} does not have the role '{ROLE_DISPLAY_NAMES.get(role, role)}'.")
+    except ValueError:
+        await update.message.reply_text("⚠️ Please provide a valid numerical user ID.")
+    except Exception as e:
+        logger.error(f"❌ Error in remove_role_command handler: {e}")
+        await update.message.reply_text("❌ An error occurred while removing the role. Please try again later.")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /start command."""
@@ -766,27 +842,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         if not user.username:
             await update.message.reply_text(
-                "Please set a Telegram username in your profile to use specific commands like `-@username`.",
+                "ℹ️ Please set a Telegram username in your profile to use specific commands like `-@username`.",
                 parse_mode='Markdown'
             )
-            logger.warning(f"User {user.id} has no username and cannot be targeted.")
+            logger.warning(f"⚠️ User {user.id} has no username and cannot be targeted.")
             return
 
         # Add or update username mapping
         username_mapping.add_username(user.username, user.id)
 
-        # Optionally, assign a default role or prompt the user to select roles
-        await update.message.reply_text(
-            f"Hello, {get_display_name(user)}! Welcome to the Team Communication Bot.\n\n"
-            "Feel free to send messages using the available commands."
-        )
-        logger.info(f"User {user.id} started the bot.")
-
+        # Check if there are any Role Masters
+        current_role_masters = get_role_masters()
+        if not current_role_masters:
+            # Assign the first user as Role Master
+            add_role_master(user.id)
+            await update.message.reply_text(
+                f"🎉 You have been assigned as a Role Master since there were no existing Role Masters.",
+                parse_mode='Markdown'
+            )
+            logger.info(f"🔰 User {user.id} has been assigned as the initial Role Master.")
+        else:
+            await update.message.reply_text(
+                f"👋 Hello, {get_display_name(user)}! Welcome to the Team Communication Bot.\n\n"
+                "Feel free to send messages using the available commands."
+            )
+            logger.info(f"👋 User {user.id} started the bot.")
     except Exception as e:
-        logger.error(f"Error in start handler: {e}")
-        await update.message.reply_text("An error occurred while starting the bot. Please try again later.")
+        logger.error(f"❌ Error in start handler: {e}")
+        await update.message.reply_text("❌ An error occurred while starting the bot. Please try again later.")
 
-@restricted
+@role_master_only
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all stored usernames and their user IDs. Restricted to Tara Team and Role Masters."""
     try:
@@ -794,15 +879,15 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         roles = get_roles(user_id)
 
         if 'tara_team' not in roles and not is_role_master(user_id):
-            await update.message.reply_text("You are not authorized to use this command.")
-            logger.warning(f"Unauthorized access attempt by user {user_id} for /listusers.")
+            await update.message.reply_text("🚫 You are not authorized to use this command.")
+            logger.warning(f"🚫 Unauthorized access attempt by user {user_id} for /listusers.")
             return
 
         # List all users and their roles
         from role_master import user_roles  # Import user_roles dictionary
 
         if not user_roles:
-            await update.message.reply_text("No users have been assigned roles yet.")
+            await update.message.reply_text("ℹ️ No users have been assigned roles yet.")
             return
 
         user_list = []
@@ -816,11 +901,11 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_list.append(f"User ID {uid}: {', '.join(display_names)}")
 
         user_list_text = "\n".join(user_list)
-        await update.message.reply_text(f"**Registered Users and Roles:**\n{user_list_text}", parse_mode='Markdown')
-        logger.info(f"User {user_id} requested the list of users and roles.")
+        await update.message.reply_text(f"**📋 Registered Users and Roles:**\n{user_list_text}", parse_mode='Markdown')
+        logger.info(f"📋 User {user_id} requested the list of users and roles.")
     except Exception as e:
-        logger.error(f"Error in list_users handler: {e}")
-        await update.message.reply_text("An error occurred while listing users. Please try again later.")
+        logger.error(f"❌ Error in list_users handler: {e}")
+        await update.message.reply_text("❌ An error occurred while listing users. Please try again later.")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Provide help information to users with subcommands explanations."""
@@ -833,14 +918,18 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/help_master - Show Role Master help (Role Masters only).\n"
             "/add_role_master <user_id> - Assign a Role Master to a user (Role Masters only).\n"
             "/remove_role_master <user_id> - Revoke Role Master from a user (Role Masters only).\n"
+            "/list_role_masters - List all current Role Masters (Role Masters only).\n"
             "/addrole <user_id> <role> - Assign a role to a user (Role Masters only).\n"
             "/removerole <user_id> <role> - Remove a role from a user (Role Masters only).\n"
             "/refresh - Refresh your user information.\n"
-            "/cancel - Cancel the current operation.\n\n"
-            "*Message Sending Triggers:*\n"
+            "/mute [user_id] - Mute yourself or another user (Role Masters only).\n"
+            "/muteid <user_id> - Mute a specific user by their ID (Role Masters only).\n"
+            "/unmuteid <user_id> - Unmute a specific user by their ID (Role Masters only).\n"
+            "/listmuted - List all currently muted users (Role Masters only).\n\n"
+            "*🔑 Message Sending Triggers:*\n"
             "`-team` - Send a message to your own team and Tara Team.\n"
             "`-t` - Send a message exclusively to the Tara Team.\n\n"
-            "*Specific Commands for Tara Team and Role Masters:*\n"
+            "*👥 Specific Commands for Tara Team and Role Masters:*\n"
             "`-@username` - Send a message to a specific user.\n"
             "`-w` - Send a message to the Writer Team.\n"
             "`-e` - Send a message to the Editor Team.\n"
@@ -849,7 +938,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "`-de` - Send a message to the Design Team.\n"
             "`-mf` - Send a message to the Mind Map & Form Creation Team.\n"
             "`-c` - Send a message to the Checker Team.\n\n"
-            "*Admin Commands (Role Masters only):*\n"
+            "*🔧 Admin Commands (Role Masters only):*\n"
             "/mute [user_id] - Mute yourself or another user.\n"
             "/muteid <user_id> - Mute a specific user by their ID.\n"
             "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
@@ -859,76 +948,44 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "- Use `/cancel` to cancel any ongoing operation."
         )
         await update.message.reply_text(help_text, parse_mode='Markdown')
-        logger.info(f"User {update.effective_user.id} requested help.")
+        logger.info(f"ℹ️ User {update.effective_user.id} requested help.")
     except Exception as e:
-        logger.error(f"Error in help_command handler: {e}")
-        await update.message.reply_text("An error occurred while providing help. Please try again later.")
+        logger.error(f"❌ Error in help_command handler: {e}")
+        await update.message.reply_text("❌ An error occurred while providing help. Please try again later.")
 
-@restricted
-async def add_role_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Assign a role to a user."""
+async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Refresh user information."""
     try:
-        args = context.args
-        if len(args) != 2:
-            await update.message.reply_text("Usage: /addrole <user_id> <role>")
+        user = update.effective_user
+        if not user.username:
+            await update.message.reply_text(
+                "ℹ️ Please set a Telegram username in your profile to refresh your information.",
+                parse_mode='Markdown'
+            )
+            logger.warning(f"⚠️ User {user.id} has no username and cannot be refreshed.")
             return
 
-        target_user_id = int(args[0])
-        role = args[1].lower()
+        # Update username mapping
+        username_mapping.add_username(user.username, user.id)
 
-        if role not in ROLE_DISPLAY_NAMES:
-            await update.message.reply_text(f"Invalid role. Available roles: {', '.join(ROLE_DISPLAY_NAMES.keys())}")
-            return
+        # Update user roles or perform any necessary refresh operations
+        await update.message.reply_text(
+            "✅ Your information has been refreshed successfully."
+        )
+        logger.info(f"🔄 User {user.id} refreshed their information.")
 
-        if add_role(target_user_id, role):
-            await update.message.reply_text(f"Role '{ROLE_DISPLAY_NAMES.get(role, role)}' has been assigned to user ID {target_user_id}.")
-            logger.info(f"Role '{role}' assigned to user ID {target_user_id} by Role Master {update.effective_user.id}.")
-        else:
-            await update.message.reply_text(f"User ID {target_user_id} already has the role '{ROLE_DISPLAY_NAMES.get(role, role)}'.")
-    except ValueError:
-        await update.message.reply_text("Please provide a valid user ID.")
     except Exception as e:
-        logger.error(f"Error in add_role_command handler: {e}")
-        await update.message.reply_text("An error occurred while assigning the role. Please try again later.")
+        logger.error(f"❌ Error in refresh handler: {e}")
+        await update.message.reply_text("❌ An error occurred while refreshing your information. Please try again later.")
 
-@restricted
-async def remove_role_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Remove a role from a user."""
-    try:
-        args = context.args
-        if len(args) != 2:
-            await update.message.reply_text("Usage: /removerole <user_id> <role>")
-            return
+# ------------------ Mute Command Handlers ------------------
 
-        target_user_id = int(args[0])
-        role = args[1].lower()
-
-        if role not in ROLE_DISPLAY_NAMES:
-            await update.message.reply_text(f"Invalid role. Available roles: {', '.join(ROLE_DISPLAY_NAMES.keys())}")
-            return
-
-        if remove_role(target_user_id, role):
-            await update.message.reply_text(f"Role '{ROLE_DISPLAY_NAMES.get(role, role)}' has been removed from user ID {target_user_id}.")
-            logger.info(f"Role '{role}' removed from user ID {target_user_id} by Role Master {update.effective_user.id}.")
-        else:
-            await update.message.reply_text(f"User ID {target_user_id} does not have the role '{ROLE_DISPLAY_NAMES.get(role, role)}'.")
-    except ValueError:
-        await update.message.reply_text("Please provide a valid user ID.")
-    except Exception as e:
-        logger.error(f"Error in remove_role_command handler: {e}")
-        await update.message.reply_text("An error occurred while removing the role. Please try again later.")
-
+@role_master_only
 async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /mute command for Role Masters."""
     try:
         user_id = update.message.from_user.id
         roles = get_roles(user_id)
-
-        # Restrict to Role Masters only (already handled by @restricted)
-        if 'tara_team' not in roles and not is_role_master(user_id):
-            await update.message.reply_text("You are not authorized to use this command.")
-            logger.warning(f"Unauthorized mute attempt by user {user_id} with roles '{roles}'.")
-            return
 
         # Mute self or another user
         if len(context.args) == 0:
@@ -937,66 +994,60 @@ async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 target_user_id = int(context.args[0])
             except ValueError:
-                await update.message.reply_text("Please provide a valid user ID.")
+                await update.message.reply_text("⚠️ Please provide a valid numerical user ID.")
                 return
         else:
-            await update.message.reply_text("Usage: /mute [user_id]")
+            await update.message.reply_text("ℹ️ Usage: /mute [user_id]")
             return
 
         if target_user_id in muted_users:
             if target_user_id == user_id:
-                await update.message.reply_text("You are already muted.")
+                await update.message.reply_text("ℹ️ You are already muted.")
             else:
-                await update.message.reply_text("This user is already muted.")
-            logger.info(f"Attempt to mute already muted user {target_user_id} by {user_id}.")
+                await update.message.reply_text("ℹ️ This user is already muted.")
+            logger.info(f"🔇 Attempt to mute already muted user {target_user_id} by {user_id}.")
             return
 
         muted_users.add(target_user_id)
         save_muted_users()
 
         if target_user_id == user_id:
-            await update.message.reply_text("You have been muted and can no longer send messages through this bot.")
-            logger.info(f"User {user_id} has muted themselves.")
+            await update.message.reply_text("🔇 You have been muted and can no longer send messages through this bot.")
+            logger.info(f"🔇 User {user_id} has muted themselves.")
         else:
             # Attempt to get the username of the target user
             target_username = username_mapping.get_username(target_user_id)
             if target_username:
-                await update.message.reply_text(f"User `@{target_username}` has been muted.", parse_mode='Markdown')
-                logger.info(f"User {user_id} has muted user {target_user_id} (@{target_username}).")
+                await update.message.reply_text(f"✅ User `{target_username}` has been muted.", parse_mode='Markdown')
+                logger.info(f"🔇 User {user_id} has muted user {target_user_id} (@{target_username}).")
             else:
-                await update.message.reply_text(f"User ID {target_user_id} has been muted.")
-                logger.info(f"User {user_id} has muted user {target_user_id}.")
+                await update.message.reply_text(f"✅ User ID {target_user_id} has been muted.")
+                logger.info(f"🔇 User {user_id} has muted user {target_user_id}.")
 
     except Exception as e:
-        logger.error(f"Error in mute_command handler: {e}")
-        await update.message.reply_text("An error occurred while muting the user. Please try again later.")
+        logger.error(f"❌ Error in mute_command handler: {e}")
+        await update.message.reply_text("❌ An error occurred while muting the user. Please try again later.")
 
-@restricted
+@role_master_only
 async def mute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /muteid command for Role Masters."""
     await mute_command(update, context)
 
-@restricted
+@role_master_only
 async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /unmuteid command for Role Masters."""
     try:
         user_id = update.message.from_user.id
         roles = get_roles(user_id)
 
-        # Restrict to Role Masters only (already handled by @restricted)
-        if 'tara_team' not in roles and not is_role_master(user_id):
-            await update.message.reply_text("You are not authorized to use this command.")
-            logger.warning(f"Unauthorized unmute attempt by user {user_id} with roles '{roles}'.")
-            return
-
         if len(context.args) != 1:
-            await update.message.reply_text("Usage: /unmuteid <user_id>")
+            await update.message.reply_text("ℹ️ Usage: /unmuteid <user_id>")
             return
 
         try:
             target_user_id = int(context.args[0])
         except ValueError:
-            await update.message.reply_text("Please provide a valid user ID.")
+            await update.message.reply_text("⚠️ Please provide a valid numerical user ID.")
             return
 
         if target_user_id in muted_users:
@@ -1007,34 +1058,28 @@ async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_username = username_mapping.get_username(target_user_id)
 
             if target_username:
-                await update.message.reply_text(f"User `@{target_username}` has been unmuted.", parse_mode='Markdown')
-                logger.info(f"User {user_id} has unmuted user {target_user_id} (@{target_username}).")
+                await update.message.reply_text(f"✅ User `{target_username}` has been unmuted.", parse_mode='Markdown')
+                logger.info(f"🔈 User {user_id} has unmuted user {target_user_id} (@{target_username}).")
             else:
-                await update.message.reply_text(f"User ID {target_user_id} has been unmuted.")
-                logger.info(f"User {user_id} has unmuted user {target_user_id}.")
+                await update.message.reply_text(f"✅ User ID {target_user_id} has been unmuted.")
+                logger.info(f"🔈 User {user_id} has unmuted user {target_user_id}.")
         else:
-            await update.message.reply_text(f"User ID {target_user_id} is not muted.")
-            logger.warning(f"Attempt to unmute user {target_user_id} who is not muted by user {user_id}.")
+            await update.message.reply_text(f"ℹ️ User ID {target_user_id} is not muted.")
+            logger.warning(f"⚠️ Attempt to unmute user {target_user_id} who is not muted by user {user_id}.")
 
     except Exception as e:
-        logger.error(f"Error in unmute_id_command handler: {e}")
-        await update.message.reply_text("An error occurred while unmuting the user. Please try again later.")
+        logger.error(f"❌ Error in unmute_id_command handler: {e}")
+        await update.message.reply_text("❌ An error occurred while unmuting the user. Please try again later.")
 
-@restricted
+@role_master_only
 async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /listmuted command for Role Masters."""
     try:
         user_id = update.message.from_user.id
         roles = get_roles(user_id)
 
-        # Restrict to Role Masters only (already handled by @restricted)
-        if 'tara_team' not in roles and not is_role_master(user_id):
-            await update.message.reply_text("You are not authorized to use this command.")
-            logger.warning(f"Unauthorized access attempt by user {user_id} for /listmuted.")
-            return
-
         if not muted_users:
-            await update.message.reply_text("No users are currently muted.")
+            await update.message.reply_text("ℹ️ No users are currently muted.")
             return
 
         muted_list = []
@@ -1047,11 +1092,11 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 muted_list.append(f"User ID {uid}")
 
         muted_users_text = "\n".join(muted_list)
-        await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
-        logger.info(f"User {user_id} requested the list of muted users.")
+        await update.message.reply_text(f"**🔇 Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
+        logger.info(f"🔇 User {user_id} requested the list of muted users.")
     except Exception as e:
-        logger.error(f"Error in list_muted_command handler: {e}")
-        await update.message.reply_text("An error occurred while listing muted users. Please try again later.")
+        logger.error(f"❌ Error in list_muted_command handler: {e}")
+        await update.message.reply_text("❌ An error occurred while listing muted users. Please try again later.")
 
 # ------------------ Conversation Handlers ------------------
 
@@ -1122,13 +1167,13 @@ general_conv_handler = ConversationHandler(
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     """Log the error and send a message to the user if necessary."""
-    logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
+    logger.error(f"❌ Exception while handling an update: {context.error}", exc_info=True)
     # Optionally, notify the user about the error
     if isinstance(update, Update) and update.message:
         try:
-            await update.message.reply_text("An error occurred. Please try again later.")
+            await update.message.reply_text("❌ An error occurred. Please try again later.")
         except Exception as e:
-            logger.error(f"Failed to send error message to user: {e}")
+            logger.error(f"❌ Failed to send error message to user: {e}")
 
 # ------------------ Main Function ------------------
 
@@ -1136,7 +1181,7 @@ def main():
     """Main function to start the Telegram bot."""
     BOT_TOKEN = os.getenv('BOT_TOKEN')
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN is not set in environment variables.")
+        logger.error("🚫 BOT_TOKEN is not set in environment variables.")
         return
 
     try:
@@ -1150,6 +1195,7 @@ def main():
         application.add_handler(CommandHandler('help_master', help_master))
         application.add_handler(CommandHandler('add_role_master', add_role_master_command))
         application.add_handler(CommandHandler('remove_role_master', remove_role_master_command))
+        application.add_handler(CommandHandler('list_role_masters', list_role_masters_command))
         application.add_handler(CommandHandler('addrole', add_role_command))
         application.add_handler(CommandHandler('removerole', remove_role_command))
         application.add_handler(CommandHandler('refresh', refresh))
@@ -1169,10 +1215,10 @@ def main():
         application.add_error_handler(error_handler)
 
         # Start the Bot using long polling
-        logger.info("Bot started polling...")
+        logger.info("🤖 Bot started polling...")
         application.run_polling()
     except Exception as e:
-        logger.error(f"Failed to start the bot: {e}")
+        logger.error(f"🚫 Failed to start the bot: {e}")
 
 if __name__ == '__main__':
     main()
