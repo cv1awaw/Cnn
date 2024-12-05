@@ -75,12 +75,13 @@ TRIGGER_TARGET_MAP = {
 }
 
 # Define target roles for each role based on user requirements
+# **Updated to include only sender's role and 'tara_team'**
 SENDING_ROLE_TARGETS = {
-    'writer': ['writer', 'mcqs_team', 'checker_team', 'tara_team'],
-    'mcqs_team': ['mcqs_team', 'design_team', 'tara_team'],
-    'checker_team': ['checker_team', 'tara_team', 'word_team'],
+    'writer': ['writer', 'tara_team'],
+    'mcqs_team': ['mcqs_team', 'tara_team'],
+    'checker_team': ['checker_team', 'tara_team'],
     'word_team': ['word_team', 'tara_team'],
-    'design_team': ['design_team', 'tara_team', 'king_team'],
+    'design_team': ['design_team', 'tara_team'],
     'king_team': ['king_team', 'tara_team'],
     'tara_team': [
         'writer', 'mcqs_team', 'checker_team',
@@ -331,17 +332,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 # Prepare display names for confirmation
                 sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
 
-                if 'specific_user' in target_roles:
-                    recipient_display_names = []
-                    for tid in target_ids:
-                        try:
-                            chat = await context.bot.get_chat(tid)
-                            recipient_display_names.append(get_display_name(chat))
-                        except Exception as e:
-                            logger.error(f"Failed to get chat info for user ID {tid}: {e}")
-                            recipient_display_names.append(f"User ID {tid}")
-                else:
-                    recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles if r != 'specific_user']
+                recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles if r != 'specific_user']
 
                 if any(msg.document for msg in messages_to_send):
                     confirmation_text = (
@@ -408,6 +399,8 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             for role in target_roles:
                 target_ids.update(ROLE_MAP.get(role, []))
             target_ids.discard(pending_message.from_user.id)
+
+            logger.debug(f"Selected role '{selected_role}' targets user IDs: {target_ids}")
 
             if not target_ids:
                 await query.edit_message_text("No recipients found to send your message.")
@@ -535,11 +528,16 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Determine target roles: user's own role and Tara Team
         target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
 
+        # Log the target roles for debugging
+        logger.debug(f"Selected role '{selected_role}' targets roles: {target_roles}")
+
         # Determine target user IDs
         target_ids = set()
         for role in target_roles:
             target_ids.update(ROLE_MAP.get(role, []))
         target_ids.discard(user_id)  # Prevent sending to self if necessary
+
+        logger.debug(f"Target user IDs for role '{selected_role}': {target_ids}")
 
         if not target_ids:
             await update.message.reply_text("No recipients found to send your message.")
@@ -581,6 +579,9 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_roles = ['tara_team']
         target_ids = set(ROLE_MAP.get('tara_team', []))
         target_ids.discard(user_id)
+
+        logger.debug(f"Target roles for -t: {target_roles}")
+        logger.debug(f"Target user IDs for -t: {target_ids}")
 
         if not target_ids:
             await update.message.reply_text("No recipients found to send your message.")
@@ -661,6 +662,8 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
             for role in target_roles:
                 target_ids.update(ROLE_MAP.get(role, []))
             target_ids.discard(user_id)
+
+            logger.debug(f"Selected role '{selected_role}' targets user IDs: {target_ids}")
 
             if not target_ids:
                 await message.reply_text("No recipients found to send your message.")
@@ -908,6 +911,7 @@ async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(f"User ID {target_user_id} is not muted.")
             logger.warning(f"Attempt to unmute user {target_user_id} who is not muted by user {user_id}.")
+
     except Exception as e:
         logger.error(f"Error in unmute_id_command handler: {e}")
         await update.message.reply_text("An error occurred while unmuting the user. Please try again later.")
