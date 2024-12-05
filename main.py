@@ -59,14 +59,14 @@ def get_display_name(user):
 def add_username(username, user_id):
     """Add or update a username to the mapping."""
     username_lower = username.lower()
-    if username_lower not in roles.username_mapping:
-        roles.username_mapping[username_lower] = user_id
+    if username_lower not in roles.roles["username_mapping"]:
+        roles.roles["username_mapping"][username_lower] = user_id
         roles.save_roles(roles.roles)
         logger.info(f"➕ Added username '{username_lower}' mapped to user ID {user_id}.")
         return True
-    if roles.username_mapping[username_lower] != user_id:
+    if roles.roles["username_mapping"][username_lower] != user_id:
         # Update the mapping if user_id has changed
-        roles.username_mapping[username_lower] = user_id
+        roles.roles["username_mapping"][username_lower] = user_id
         roles.save_roles(roles.roles)
         logger.info(f"🔄 Updated username '{username_lower}' to map to user ID {user_id}.")
         return True
@@ -75,11 +75,11 @@ def add_username(username, user_id):
 
 def get_user_id(username):
     """Retrieve the user ID by username."""
-    return roles.username_mapping.get(username.lower())
+    return roles.roles["username_mapping"].get(username.lower())
 
 def get_username(user_id):
     """Retrieve the username by user ID."""
-    for uname, uid in roles.username_mapping.items():
+    for uname, uid in roles.roles["username_mapping"].items():
         if uid == user_id:
             return f"@{uname}"
     return None
@@ -713,6 +713,7 @@ async def remove_role_master_command(update: Update, context: ContextTypes.DEFAU
 
         target_user_id = int(args[0])
 
+        # Prevent self-demotion if only one Role Master exists
         if target_user_id == 6177929931 and len(roles.roles.get("role_masters", set())) == 1:
             await update.message.reply_text("⚠️ You cannot revoke your own Role Master status as you are the only Role Master.")
             logger.warning(f"Role Master {6177929931} attempted to revoke their own status while being the sole Role Master.")
@@ -955,30 +956,51 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # ------------------ Help Command ------------------
 
-@role_master_only
-async def help_master_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Provide help information exclusive to Role Masters."""
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Provide comprehensive help information to users, including Role Master commands."""
     try:
+        user_id = update.effective_user.id
+        is_role_master = user_id in roles.roles.get("role_masters", set())
+        
         help_text = (
-            "📘 *Role Master Commands:*\n\n"
-            "/add_role_master <user_id> - Promote a user to Role Master.\n"
-            "/remove_role_master <user_id> - Demote a user from Role Master.\n"
-            "/list_role_masters - List all current Role Masters.\n"
-            "/addrole <user_id> <role> - Assign a role to a user.\n"
-            "/removerole <user_id> <role> - Remove a role from a user.\n"
-            "/mute [user_id] - Mute yourself or another user.\n"
-            "/muteid <user_id> - Mute a specific user by their User ID.\n"
-            "/unmuteid <user_id> - Unmute a specific user by their User ID.\n"
-            "/listmuted - List all currently muted users.\n\n"
-            "*🔧 Notes:*\n"
+            "📘 *Available Commands:*\n\n"
+            
+            "**🔹 General Commands:**\n"
+            "/start - Initialize interaction with the bot.\n"
+            "/help - Show this help message.\n\n"
+            
+            "**🔹 Message Sending Triggers:**\n"
+            "`-team` - Send a message to your team and the Tara Team.\n"
+            "`-t` - Send a message exclusively to the Tara Team.\n"
+            "`-@username` - Send a message to a specific user.\n\n"
+        )
+        
+        if is_role_master:
+            help_text += (
+                "**🛡️ Role Master Commands:**\n"
+                "/add_role_master <user_id> - Promote a user to Role Master.\n"
+                "/remove_role_master <user_id> - Demote a user from Role Master.\n"
+                "/list_role_masters - List all current Role Masters.\n"
+                "/addrole <user_id> <role> - Assign a role to a user.\n"
+                "/removerole <user_id> <role> - Remove a role from a user.\n"
+                "/mute [user_id] - Mute yourself or another user.\n"
+                "/muteid <user_id> - Mute a specific user by their User ID.\n"
+                "/unmuteid <user_id> - Unmute a specific user by their User ID.\n"
+                "/listmuted - List all currently muted users.\n\n"
+            )
+        
+        help_text += (
+            "**🔧 Notes:**\n"
             "- Only Role Masters can manage roles and muting.\n"
             "- Roles include: writer, mcqs_team, checker_team, word_team, design_team, king_team, mind_map_form_creator, tara_team.\n"
             "- Use `/cancel` to cancel any ongoing operation."
         )
+        
         await update.message.reply_text(help_text, parse_mode='Markdown')
-        logger.info(f"👓 Role Master {update.effective_user.id} accessed /help_master.")
+        logger.info(f"ℹ️ User {user_id} requested help.")
+    
     except Exception as e:
-        logger.error(f"❌ Error in help_master_command handler: {e}")
+        logger.error(f"❌ Error in help_command handler: {e}")
         await update.message.reply_text("❌ An error occurred while providing help. Please try again later.")
 
 # ------------------ Start Command ------------------
@@ -1016,28 +1038,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ------------------ General Help Command ------------------
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Provide help information to users."""
-    try:
-        help_text = (
-            "📘 *Available Commands:*\n\n"
-            "/start - Initialize interaction with the bot.\n"
-            "/help - Show this help message.\n"
-            "/help_master - Show Role Master help (Role Masters only).\n\n"
-            "*🔑 Message Sending Triggers:*\n"
-            "`-team` - Send a message to your team and the Tara Team.\n"
-            "`-t` - Send a message exclusively to the Tara Team.\n"
-            "`-@username` - Send a message to a specific user.\n\n"
-            "*🔧 Notes:*\n"
-            "- Only Role Masters can manage roles and muting.\n"
-            "- Roles include: writer, mcqs_team, checker_team, word_team, design_team, king_team, mind_map_form_creator, tara_team.\n"
-            "- Use `/cancel` to cancel any ongoing operation."
-        )
-        await update.message.reply_text(help_text, parse_mode='Markdown')
-        logger.info(f"ℹ️ User {update.effective_user.id} requested help.")
-    except Exception as e:
-        logger.error(f"❌ Error in help_command handler: {e}")
-        await update.message.reply_text("❌ An error occurred while providing help. Please try again later.")
+# Note: The help_command function has been updated above to include all commands.
+
+# ------------------ Error Handler ------------------
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Log the error and send a message to the user if necessary."""
+    logger.error(f"❌ Exception while handling an update: {context.error}", exc_info=True)
+    # Optionally, notify the user about the error
+    if isinstance(update, Update) and update.message:
+        try:
+            await update.message.reply_text("❌ An error occurred. Please try again later.")
+        except Exception as e:
+            logger.error(f"❌ Failed to send error message to user: {e}")
 
 # ------------------ Main Function ------------------
 
@@ -1055,7 +1068,6 @@ def main():
         # Add Command Handlers
         application.add_handler(CommandHandler('start', start_command))
         application.add_handler(CommandHandler('help', help_command))
-        application.add_handler(CommandHandler('help_master', help_master_command))
         application.add_handler(CommandHandler('add_role_master', add_role_master_command))
         application.add_handler(CommandHandler('remove_role_master', remove_role_master_command))
         application.add_handler(CommandHandler('list_role_masters', list_role_masters_command))
@@ -1130,6 +1142,9 @@ def main():
         application.add_handler(team_conv_handler)
         application.add_handler(tara_conv_handler)
         application.add_handler(general_conv_handler)
+
+        # Add the error handler
+        application.add_error_handler(error_handler)
 
         # Start the Bot using long polling
         logger.info("🤖 Bot started polling...")
