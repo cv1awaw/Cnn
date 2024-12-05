@@ -10,6 +10,9 @@ logger = logging.getLogger(__name__)
 # File to store user roles
 USER_ROLES_FILE = Path('user_roles.json')
 
+# File to store Role Masters
+ROLE_MASTERS_FILE = Path('role_masters.json')
+
 # Load existing user roles or initialize an empty dictionary
 if USER_ROLES_FILE.exists():
     try:
@@ -24,6 +27,18 @@ if USER_ROLES_FILE.exists():
 else:
     user_roles = {}
 
+# Load existing Role Masters or initialize an empty list
+if ROLE_MASTERS_FILE.exists():
+    try:
+        with open(ROLE_MASTERS_FILE, 'r') as f:
+            role_masters = set(json.load(f))
+            logger.info("Loaded existing Role Masters from role_masters.json.")
+    except json.JSONDecodeError:
+        role_masters = set()
+        logger.error("role_masters.json is not a valid JSON file. Starting with an empty Role Masters set.")
+else:
+    role_masters = set()
+
 def save_user_roles():
     """Save the user_roles dictionary to a JSON file."""
     try:
@@ -33,6 +48,15 @@ def save_user_roles():
             logger.info("Saved user roles to user_roles.json.")
     except Exception as e:
         logger.error(f"Failed to save user roles: {e}")
+
+def save_role_masters():
+    """Save the role_masters set to a JSON file."""
+    try:
+        with open(ROLE_MASTERS_FILE, 'w') as f:
+            json.dump(list(role_masters), f, indent=4)
+            logger.info("Saved Role Masters to role_masters.json.")
+    except Exception as e:
+        logger.error(f"Failed to save Role Masters: {e}")
 
 def add_role(user_id, role):
     """Add a role to a user."""
@@ -82,3 +106,33 @@ def remove_roles(user_id, roles):
         if remove_role(user_id, role):
             updated = True
     return updated
+
+# Role Master Management Functions
+
+def add_role_master(user_id):
+    """Add a user as a Role Master."""
+    if user_id not in role_masters:
+        role_masters.add(user_id)
+        save_role_masters()
+        logger.info(f"User ID {user_id} has been added as a Role Master.")
+        return True
+    logger.info(f"User ID {user_id} is already a Role Master.")
+    return False
+
+def remove_role_master(user_id):
+    """Remove a user from Role Masters."""
+    if user_id in role_masters:
+        role_masters.remove(user_id)
+        save_role_masters()
+        logger.info(f"User ID {user_id} has been removed from Role Masters.")
+        return True
+    logger.info(f"User ID {user_id} is not a Role Master.")
+    return False
+
+def get_role_masters():
+    """Retrieve all Role Masters."""
+    return role_masters
+
+def is_role_master(user_id):
+    """Check if a user is a Role Master."""
+    return user_id in role_masters
