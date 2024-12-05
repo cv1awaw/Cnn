@@ -1,50 +1,10 @@
 # roles.py
 
-import json
-from pathlib import Path
-
-ROLES_FILE = Path('roles.json')
-
-def load_roles():
-    """Load roles from the roles.json file."""
-    if ROLES_FILE.exists():
-        try:
-            with open(ROLES_FILE, 'r') as f:
-                data = json.load(f)
-                # Convert lists to sets for efficient lookups
-                roles = {role: set(user_ids) for role, user_ids in data.items() if role not in ["username_mapping", "muted_users"]}
-                roles["username_mapping"] = {uname.lower(): uid for uname, uid in data.get("username_mapping", {}).items()}
-                roles["muted_users"] = set(data.get("muted_users", []))
-                return roles
-        except json.JSONDecodeError:
-            print("Error: roles.json is not a valid JSON file.")
-    # Initialize with default roles if roles.json doesn't exist or is invalid
-    return {
-        "writer": set(),
-        "mcqs_team": set(),
-        "checker_team": set(),
-        "word_team": set(),
-        "design_team": set(),
-        "king_team": set(),
-        "tara_team": set(),
-        "mind_map_form_creator": set(),
-        "role_masters": set(),
-        "username_mapping": {},
-        "muted_users": set()
-    }
-
-def save_roles(roles):
-    """Save roles to the roles.json file."""
-    try:
-        # Convert sets to lists for JSON serialization, except for username_mapping and muted_users
-        data = {role: list(user_ids) for role, user_ids in roles.items() if role not in ["username_mapping", "muted_users"]}
-        data["username_mapping"] = roles["username_mapping"]
-        data["muted_users"] = list(roles["muted_users"])
-        with open(ROLES_FILE, 'w') as f:
-            json.dump(data, f, indent=4)
-        print("✅ Roles have been saved to roles.json.")
-    except Exception as e:
-        print(f"Error saving roles: {e}")
-
-# Load roles at the start
-roles = load_roles()
+WRITER_IDS = {7491629866 , 7030185248 , 585812065 , 6969704654 , 1162719050 , 6377619159 , 935602501 , 6702007291 , 7354567881}          # Replace with actual writer user IDs
+MCQS_TEAM_IDS = {6690281336 , 6785363903}       # Replace with actual MCQs team user IDs
+CHECKER_TEAM_IDS = {591536381 , 7354567 }    # Replace with actual checker team user IDs
+WORD_TEAM_IDS = {7491629866 , 758645645}       # Replace with actual word team user IDs
+DESIGN_TEAM_IDS = {7030185248 , 7354567 }     # Replace with actual design team user IDs
+KING_TEAM_IDS = {11111 , 73545678 , 6898449897}     # Replace with actual king team user IDs
+TARA_TEAM_IDS = {137745730 , 6177929931 , 333135898 , 6898449897}     # Replace with actual Tara team user IDs
+MIND_MAP_FORM_CREATOR_IDS = {1703780092}
