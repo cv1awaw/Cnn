@@ -158,6 +158,12 @@ async def send_confirmation(messages, context, sender_role, target_ids, target_r
         else:
             target_roles_display = [role.replace('_', ' ').title() for role in SENDING_ROLE_TARGETS.get(sender_role, [])]
 
+        # Prepare sender display name
+        if sender_role == 'role_master':
+            sender_display_name = "Role Master"
+        else:
+            sender_display_name = sender_role.replace('_', ' ').title()
+
         confirmation_text = (
             f"📩 *You are about to send the following to **{', '.join(target_roles_display)}**:*\n\n"
             f"{content_description}\n\n"
@@ -206,6 +212,7 @@ SENDING_ROLE_TARGETS = {
         'word_team', 'design_team', 'king_team', 'tara_team'
     ],
     'mind_map_form_creator': ['mind_map_form_creator', 'tara_team'],
+    'role_master': ['tara_team'],  # Define target roles for Role Masters
 }
 
 # ------------------ Conversation Handlers ------------------
@@ -274,7 +281,10 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                             logger.error(f"❌ Failed to send message/document to user {user_id}: {e}")
 
                 # Prepare confirmation text
-                sender_display_name = sender_role.replace('_', ' ').title()
+                if sender_role == 'role_master':
+                    sender_display_name = "Role Master"
+                else:
+                    sender_display_name = sender_role.replace('_', ' ').title()
                 recipient_display_names = [role.replace('_', ' ').title() for role in target_roles]
 
                 if any(msg.document for msg in messages_to_send):
@@ -410,7 +420,7 @@ async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TY
         # Store target user ID and other necessary data in bot_data
         context.bot_data['target_user_id'] = target_user_id
         context.bot_data['target_username'] = target_username
-        context.bot_data['sender_role'] = 'tara_team'  # Assuming Role Master uses 'tara_team' role for specific user commands
+        context.bot_data['sender_role'] = 'role_master'  # Assign sender role as 'role_master'
 
         await update.message.reply_text(f"✍️ Write your message for user `@{target_username}`.", parse_mode='Markdown')
         logger.info(f"Role Master {user_id} is sending a message to user @{target_username} (ID: {target_user_id}).")
@@ -454,7 +464,7 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
             return ConversationHandler.END
 
         # Store sender role
-        context.bot_data['sender_role'] = 'tara_team'  # Assuming Role Master uses 'tara_team' role for specific team commands
+        context.bot_data['sender_role'] = 'role_master'  # Assign sender role as 'role_master'
 
         await update.message.reply_text("✍️ Write your message for your team.")
         logger.info(f"Role Master {user_id} is sending a message to roles {target_roles}.")
@@ -471,15 +481,20 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.message.from_user.id
         roles_user = list_users_with_role("tara_team")  # Adjust if necessary
 
+        # Determine if the user is a Role Master
+        is_role_master = user_id in roles.roles.get("role_masters", set())
         roles_assigned = [role for role, users in roles.roles.items() if user_id in users and role != "role_masters"]
 
-        if not roles_assigned:
+        if not roles_assigned and not is_role_master:
             await update.message.reply_text("⚠️ You don't have a role assigned to use this bot.")
             logger.warning(f"⚠️ User {user_id} attempted to use -team without a role.")
             return ConversationHandler.END
 
-        if len(roles_assigned) > 1:
-            # Prompt the user to select a role
+        if is_role_master and not roles_assigned:
+            selected_role = 'role_master'  # Define a default role name for Role Masters
+            context.bot_data['sender_role'] = selected_role
+        elif len(roles_assigned) > 1:
+            # User has multiple roles, prompt to choose one
             context.bot_data['pending_message'] = update.message
             keyboard = []
             for role in roles_assigned:
@@ -497,11 +512,14 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return SELECT_ROLE
         else:
             # User has a single role, proceed to confirmation
-            selected_role = roles_assigned[0]
+            selected_role = roles_assigned[0] if roles_assigned else 'role_master'
             context.bot_data['sender_role'] = selected_role
 
-            # Determine target roles: user's own role and Tara Team
-            target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
+            # Determine target roles: user's own role and Tara Team (or handle role_master accordingly)
+            if selected_role == 'role_master':
+                target_roles = ['tara_team']
+            else:
+                target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
 
             # Determine target user IDs
             target_ids = set()
@@ -539,17 +557,24 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.message.from_user.id
         roles_user = list_users_with_role("tara_team")
 
+        # Determine if the user is a Role Master
+        is_role_master = user_id in roles.roles.get("role_masters", set())
         roles_assigned = [role for role, users in roles.roles.items() if user_id in users and role != "role_masters"]
 
-        if not roles_assigned:
+        if not roles_assigned and not is_role_master:
             await update.message.reply_text("⚠️ You don't have a role assigned to use this bot.")
             logger.warning(f"⚠️ User {user_id} attempted to use -t without a role.")
             return ConversationHandler.END
 
-        # Store the user's role
-        selected_role = roles_assigned[0]  # Use the first role
-        context.bot_data['sender_role'] = selected_role
+        if is_role_master and not roles_assigned:
+            selected_role = 'role_master'  # Define a default role name for Role Masters
+            context.bot_data['sender_role'] = selected_role
+        else:
+            # User has a single role, proceed to confirmation
+            selected_role = roles_assigned[0] if roles_assigned else 'role_master'
+            context.bot_data['sender_role'] = selected_role
 
+        # Determine target roles: Tara Team
         target_roles = ['tara_team']
         target_ids = set(list_users_with_role('tara_team'))
         target_ids.discard(user_id)
@@ -599,20 +624,25 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         if username:
             added = add_username(username, user_id)
             if added:
-                await message.reply_text(f"✅ Username `@{username}` has been mapped to your User ID.")
+                await message.reply_text(f"✅ Username `@{username}` has been mapped to your User ID.", parse_mode='Markdown')
         else:
             logger.info(f"👤 User {user_id} has no username and cannot be targeted.")
 
+        # Determine if user is a Role Master
+        is_role_master = user_id in roles.roles.get("role_masters", set())
         roles_assigned = [role for role, users in roles.roles.items() if user_id in users and role != "role_masters"]
 
-        if not roles_assigned:
+        if not roles_assigned and not is_role_master:
             await message.reply_text("⚠️ You don't have a role assigned to use this bot.")
             logger.warning(f"⚠️ Unauthorized access attempt by user {user_id}.")
             return ConversationHandler.END
 
         logger.info(f"📥 Received message from user {user_id} with roles '{roles_assigned}'")
 
-        if len(roles_assigned) > 1:
+        if is_role_master and not roles_assigned:
+            selected_role = 'role_master'  # Define a default role name for Role Masters
+            context.bot_data['sender_role'] = selected_role
+        elif len(roles_assigned) > 1:
             # User has multiple roles, prompt to choose one
             context.bot_data['pending_message'] = message
             keyboard = []
@@ -631,11 +661,14 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
             return SELECT_ROLE
         else:
             # User has a single role, proceed to confirmation
-            selected_role = roles_assigned[0]
+            selected_role = roles_assigned[0] if roles_assigned else 'role_master'
             context.bot_data['sender_role'] = selected_role
 
-            # Determine target roles: user's own role and Tara Team
-            target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
+            # Determine target roles: user's own role and Tara Team (or handle role_master accordingly)
+            if selected_role == 'role_master':
+                target_roles = ['tara_team']
+            else:
+                target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
 
             # Determine target user IDs
             target_ids = set()
@@ -1035,10 +1068,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"❌ Error in start_command handler: {e}")
         await update.message.reply_text("❌ An error occurred while starting the bot. Please try again later.")
-
-# ------------------ General Help Command ------------------
-
-# Note: The help_command function has been updated above to include all commands.
 
 # ------------------ Error Handler ------------------
 
