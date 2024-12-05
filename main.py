@@ -1,5 +1,3 @@
-# main.py
-
 import logging
 import os
 import re
@@ -75,14 +73,14 @@ TRIGGER_TARGET_MAP = {
 }
 
 # Define target roles for each role based on user requirements
-# **Updated to include only sender's role and 'tara_team'**
+# **Updated to match the desired forwarding rules**
 SENDING_ROLE_TARGETS = {
-    'writer': ['writer', 'tara_team'],
-    'mcqs_team': ['mcqs_team', 'tara_team'],
-    'checker_team': ['checker_team', 'tara_team'],
-    'word_team': ['word_team', 'tara_team'],
-    'design_team': ['design_team', 'tara_team'],
-    'king_team': ['king_team', 'tara_team'],
+    'writer': ['mcqs_team', 'checker_team', 'tara_team'],
+    'mcqs_team': ['design_team', 'tara_team'],
+    'checker_team': ['tara_team', 'word_team'],
+    'word_team': ['tara_team'],
+    'design_team': ['tara_team', 'king_team'],
+    'king_team': ['tara_team'],
     'tara_team': [
         'writer', 'mcqs_team', 'checker_team',
         'word_team', 'design_team', 'king_team', 'tara_team'
@@ -525,19 +523,14 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         selected_role = roles[0]
         context.bot_data['sender_role'] = selected_role
 
-        # Determine target roles: user's own role and Tara Team
+        # Determine target roles: based on updated forwarding rules
         target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
-
-        # Log the target roles for debugging
-        logger.debug(f"Selected role '{selected_role}' targets roles: {target_roles}")
-
-        # Determine target user IDs
         target_ids = set()
         for role in target_roles:
             target_ids.update(ROLE_MAP.get(role, []))
-        target_ids.discard(user_id)  # Prevent sending to self if necessary
+        target_ids.discard(user_id)
 
-        logger.debug(f"Target user IDs for role '{selected_role}': {target_ids}")
+        logger.debug(f"Selected role '{selected_role}' targets user IDs: {target_ids}")
 
         if not target_ids:
             await update.message.reply_text("No recipients found to send your message.")
@@ -878,7 +871,7 @@ async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Restrict to Tara Team only
         if 'tara_team' not in roles:
             await update.message.reply_text("You are not authorized to use this command.")
-            logger.warning(f"Unauthorized unmute attempt by user {user_id} with roles '{roles}'.")
+            logger.warning(f"Unauthorized unmute attempt by user {user_id} for /unmuteid.")
             return
 
         if len(context.args) != 1:
