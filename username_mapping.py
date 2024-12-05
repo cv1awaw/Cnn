@@ -34,7 +34,7 @@ def save_username_mapping():
         logger.error(f"Failed to save username mapping: {e}")
 
 def add_username(username, user_id):
-    """Add a username to the mapping."""
+    """Add or update a username to the mapping."""
     username_lower = username.lower()
     if username_lower not in username_mapping:
         username_mapping[username_lower] = user_id
