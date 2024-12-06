@@ -5,6 +5,9 @@ FROM python:3.9-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# Suppress PTBUserWarning
+ENV PYTHONWARNINGS="ignore"
+
 # Set work directory
 WORKDIR /app
 
