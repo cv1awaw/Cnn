@@ -22,7 +22,7 @@ from roles import (
     DESIGN_TEAM_IDS,
     KING_TEAM_IDS,
     TARA_TEAM_IDS,
-    MIND_MAP_FORM_CREATOR_IDS,  # Newly added
+    MIND_MAP_FORM_CREATOR_IDS,
 )
 
 # ------------------ Setup Logging ------------------
@@ -43,7 +43,7 @@ ROLE_MAP = {
     'design_team': DESIGN_TEAM_IDS,
     'king_team': KING_TEAM_IDS,
     'tara_team': TARA_TEAM_IDS,
-    'mind_map_form_creator': MIND_MAP_FORM_CREATOR_IDS,  # Newly added
+    'mind_map_form_creator': MIND_MAP_FORM_CREATOR_IDS,
 }
 
 ROLE_DISPLAY_NAMES = {
@@ -54,30 +54,21 @@ ROLE_DISPLAY_NAMES = {
     'design_team': 'Design Team',
     'king_team': 'Admin Team',
     'tara_team': 'Tara Team',
-    'mind_map_form_creator': 'Mind Map & Form Creation Team',  # Newly added
+    'mind_map_form_creator': 'Mind Map & Form Creation Team',
 }
 
 # Define trigger to target roles mapping for Tara Team side commands
 TRIGGER_TARGET_MAP = {
     '-w': ['writer'],
-    '-e': ['checker_team'],          # Editor Team
+    '-e': ['checker_team'],
     '-mcq': ['mcqs_team'],
     '-d': ['word_team'],
     '-de': ['design_team'],
     '-mf': ['mind_map_form_creator'],
-    '-c': ['checker_team'],          # Additional trigger for Checker Team
+    '-c': ['checker_team'],
 }
 
-# Updated forwarding rules as requested:
-# Writer -> MCQs Team, Checker Team, Tara Team
-# MCQs Team -> Design Team, Tara Team
-# Checker Team -> Tara Team, Word Team
-# Word Team -> Tara Team
-# Design Team -> Tara Team, King Team
-# King Team -> Tara Team
-# Tara Team -> All roles (Writer, MCQs Team, Checker Team, Word Team, Design Team, King Team, Tara Team, Mind Map & Form Creator)
-# Mind Map & Form Creator -> Design Team, Tara Team
-
+# Updated forwarding rules
 SENDING_ROLE_TARGETS = {
     'writer': ['mcqs_team', 'checker_team', 'tara_team'],
     'mcqs_team': ['design_team', 'tara_team'],
@@ -197,10 +188,11 @@ async def forward_message(bot, message, target_ids, sender_role):
     for user_id in target_ids:
         try:
             if message.document:
+                # Forward the document
                 await bot.send_document(
                     chat_id=user_id,
                     document=message.document.file_id,
-                    caption=caption,
+                    caption=caption + (f"\n\n{message.caption}" if message.caption else ""),
                     parse_mode='Markdown'
                 )
                 logger.info(f"Forwarded document {message.document.file_id} to {user_id}")
@@ -224,6 +216,7 @@ async def forward_message(bot, message, target_ids, sender_role):
 
 async def send_confirmation(message, context, sender_role, target_ids, target_roles=None):
     if message.document:
+        # Treat any document as PDF for this scenario
         content_description = f"PDF: `{message.document.file_name}`"
     elif message.text:
         content_description = f"Message: `{message.text}`"
@@ -242,7 +235,6 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
     )
 
     confirmation_uuid = str(uuid.uuid4())
-
     keyboard = [
         [
             InlineKeyboardButton("✅ Confirm", callback_data=f'confirm:{confirmation_uuid}'),
@@ -250,8 +242,7 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
-    confirmation_message = await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
+    await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
 
     context.user_data[f'confirm_{confirmation_uuid}'] = {
         'message': message,
@@ -367,10 +358,7 @@ async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def specific_user_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    user_id = message.from_user.id
-
     target_user_id = context.user_data.get('target_user_id')
-    target_username = context.user_data.get('target_username')
 
     if not target_user_id:
         await message.reply_text("An error occurred. Please try again.")
@@ -380,14 +368,6 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
     context.user_data['target_roles'] = ['specific_user']
     sender_role = context.user_data.get('sender_role', 'tara_team')
 
-    try:
-        target_user = await context.bot.get_chat(target_user_id)
-        target_display_name = get_display_name(target_user)
-    except Exception as e:
-        await message.reply_text(f"Failed to retrieve user information: {e}")
-        return ConversationHandler.END
-
-    context.user_data['message_to_send'] = message
     await send_confirmation(message, context, sender_role, [target_user_id], target_roles=['specific_user'])
     return CONFIRMATION
 
@@ -414,25 +394,19 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def specific_team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    user_id = message.from_user.id
-
     target_roles = context.user_data.get('specific_target_roles', [])
     target_ids = set()
 
     for target_role in target_roles:
         target_ids.update(ROLE_MAP.get(target_role, []))
 
-    target_ids.discard(user_id)
+    target_ids.discard(update.message.from_user.id)
 
     if not target_ids:
         await message.reply_text("No recipients found to send your message.")
         return ConversationHandler.END
 
-    context.user_data['message_to_send'] = message
-    context.user_data['target_ids'] = list(target_ids)
-    context.user_data['target_roles'] = target_roles
     sender_role = context.user_data.get('sender_role', 'tara_team')
-
     await send_confirmation(message, context, sender_role, list(target_ids), target_roles=target_roles)
     return CONFIRMATION
 
@@ -459,7 +433,6 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return TEAM_MESSAGE
 
 async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # For '-team' command, we forward only to the sender's own role and Tara Team.
     message = update.message
     user_id = message.from_user.id
     selected_role = context.user_data.get('sender_role')
@@ -468,7 +441,7 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await message.reply_text("An error occurred. Please try again.")
         return ConversationHandler.END
 
-    # Overriding targets for '-team' to only the sender’s own role and Tara Team
+    # For '-team' only sender’s own role and Tara Team
     target_roles = [selected_role, 'tara_team']
     target_ids = set()
     for role in target_roles:
@@ -480,7 +453,6 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await message.reply_text("No recipients found to send your message.")
         return ConversationHandler.END
 
-    # Confirm before sending
     await send_confirmation(message, context, selected_role, list(target_ids), target_roles=target_roles)
     return CONFIRMATION
 
@@ -500,15 +472,11 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         del context.user_data['pending_message']
 
-        # Determine if this is coming from a general or a special command
-        # If from '-team', we only send to sender_role and tara_team
-        # Otherwise, from the general handling, we use SENDING_ROLE_TARGETS
+        # Check if from '-team'
         command_text = pending_message.text.strip().lower() if pending_message.text else ""
-
         if command_text == '-team':
             target_roles = [selected_role, 'tara_team']
         else:
-            # Default behavior for role selection when not `-team`
             target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
 
         target_ids = set()
@@ -560,10 +528,6 @@ async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await message.reply_text("No recipients found to send your message.")
         return ConversationHandler.END
 
-    context.user_data['message_to_send'] = message
-    context.user_data['target_ids'] = list(target_ids)
-    context.user_data['target_roles'] = target_roles
-
     await send_confirmation(message, context, sender_role, list(target_ids), target_roles=target_roles)
     return CONFIRMATION
 
@@ -574,7 +538,6 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
 
     user_id = message.from_user.id
 
-    # Check if the user is muted
     if user_id in muted_users:
         await message.reply_text("You have been muted and cannot send messages through this bot.")
         return ConversationHandler.END
@@ -604,7 +567,6 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         selected_role = roles[0]
         context.user_data['sender_role'] = selected_role
 
-        # Normal message forwarding according to SENDING_ROLE_TARGETS
         target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
         target_ids = set()
         for role in target_roles:
