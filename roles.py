@@ -1,8 +1,8 @@
 # roles.py
 
-WRITER_IDS = {7491629866 , 7030185248 , 585812065 , 6969704654 , 1162719050 , 6377619159 , 935602501 , 6702007291 , 7354567881}          # Replace with actual writer user IDs
+WRITER_IDS = {7491629866 , 7030185248 , 1414370194 , 585812065 , 6969704654 , 1162719050 , 6377619159 , 935602501 , 6702007291 , 7354567881}          # Replace with actual writer user IDs
 MCQS_TEAM_IDS = {6690281336 , 6785363903}       # Replace with actual MCQs team user IDs
-CHECKER_TEAM_IDS = {591536381 , 7354567 }    # Replace with actual checker team user IDs
+CHECKER_TEAM_IDS = {591536381 , 7354567 , 933155332 }    # Replace with actual checker team user IDs
 WORD_TEAM_IDS = {7491629866 , 758645645}       # Replace with actual word team user IDs
 DESIGN_TEAM_IDS = {7030185248 , 7354567 }     # Replace with actual design team user IDs
 KING_TEAM_IDS = {11111 , 73545678 , 6898449897}     # Replace with actual king team user IDs
