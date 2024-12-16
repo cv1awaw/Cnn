@@ -25,6 +25,9 @@ from roles import (
     MIND_MAP_FORM_CREATOR_IDS,
 )
 
+import uvloop
+import asyncio
+
 # ------------------ Setup Logging ------------------
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -577,8 +580,6 @@ async def hide_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Build the "roles_formatted" string by escaping underscores separately
     escaped_roles = []
     for r in ROLE_MAP.keys():
-        # Replace underscores with '\_', which Telegram interprets correctly in Markdown
-        # Note that we're doubling the backslash to ensure the final string contains '\_'
         role_escaped = r.replace('_', '\\_')
         escaped_roles.append(f'`{role_escaped}`')
     roles_formatted = ', '.join(escaped_roles)
@@ -981,4 +982,5 @@ def main():
     application.run_polling()
 
 if __name__ == '__main__':
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
     main()
