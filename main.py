@@ -115,7 +115,10 @@ def save_user_data():
         logger.error(f"Failed to save user data: {e}")
 
 def get_user_roles(user_id):
-    """Determine all roles of a user based on their user ID."""
+    """
+    Determine all roles of a user based on their user ID.
+    Returns a list of roles (e.g. ['writer', 'tara_team']).
+    """
     roles = []
     for role, ids in ROLE_MAP.items():
         if user_id in ids:
@@ -149,7 +152,11 @@ def save_muted_users():
 # ------------------ Helper Functions ------------------
 
 def get_display_name(user):
-    """Return the display name for a user."""
+    """
+    Return the display name for a user.
+    If a Telegram username is available, return @username.
+    Otherwise, return 'FirstName LastName' or 'FirstName'.
+    """
     if user.username:
         return f"@{user.username}"
     else:
@@ -157,6 +164,7 @@ def get_display_name(user):
         return full_name
 
 def get_confirmation_keyboard(uuid_str):
+    """Create and return an InlineKeyboardMarkup for confirm/cancel operations."""
     keyboard = [
         [
             InlineKeyboardButton("✅ Confirm", callback_data=f'confirm:{uuid_str}'),
@@ -166,6 +174,7 @@ def get_confirmation_keyboard(uuid_str):
     return InlineKeyboardMarkup(keyboard)
 
 def get_role_selection_keyboard(roles):
+    """Create and return an InlineKeyboardMarkup for selecting a user role."""
     keyboard = []
     for role in roles:
         display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
@@ -175,6 +184,10 @@ def get_role_selection_keyboard(roles):
     return InlineKeyboardMarkup(keyboard)
 
 async def forward_message(bot, message, target_ids, sender_role):
+    """
+    Forward a message (document or text) to the specified target_ids.
+    Attaches an informational caption including the sender's display name and role.
+    """
     sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
     username_display = get_display_name(message.from_user)
 
@@ -215,6 +228,10 @@ async def forward_message(bot, message, target_ids, sender_role):
             logger.error(f"Failed to forward message or send role notification to {user_id}: {e}")
 
 async def send_confirmation(message, context, sender_role, target_ids, target_roles=None):
+    """
+    Send a confirmation prompt to the user before forwarding the message.
+    Displays the message type (text or PDF/document) and asks for confirmation.
+    """
     if message.document:
         # Treat any document as PDF for this scenario
         content_description = f"PDF: `{message.document.file_name}`"
@@ -254,6 +271,7 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
 # ------------------ Handler Functions ------------------
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel the current operation."""
     if update.callback_query:
         await update.callback_query.answer()
         await update.callback_query.edit_message_text("Operation cancelled.")
@@ -262,6 +280,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handle the user's response to a confirmation prompt.
+    If confirmed, forwards the message; if cancelled, does nothing.
+    """
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -298,7 +320,11 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                     except:
                         recipient_display_names.append(str(tid))
             else:
-                recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles if r != 'specific_user']
+                recipient_display_names = [
+                    ROLE_DISPLAY_NAMES.get(r, r.capitalize())
+                    for r in target_roles
+                    if r != 'specific_user'
+                ]
 
             if message_to_send.document:
                 confirmation_text = (
@@ -330,6 +356,10 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Entry point for messages matching '-@username' format (used by Tara Team).
+    Validates user is from Tara Team, then asks for the message to send.
+    """
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
@@ -357,6 +387,10 @@ async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TY
     return SPECIFIC_USER_MESSAGE
 
 async def specific_user_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handles the actual text/document message for the specific user after '-@username' trigger.
+    Sends a confirmation before forwarding.
+    """
     message = update.message
     target_user_id = context.user_data.get('target_user_id')
 
@@ -372,6 +406,10 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
     return CONFIRMATION
 
 async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Entry point for side commands like '-w', '-e', '-mcq', etc. (used by Tara Team).
+    Validates user is Tara Team, then requests the message content.
+    """
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
@@ -393,6 +431,10 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
     return SPECIFIC_TEAM_MESSAGE
 
 async def specific_team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handles the actual text/document message for the specific team after side commands.
+    Sends a confirmation before forwarding.
+    """
     message = update.message
     target_roles = context.user_data.get('specific_target_roles', [])
     target_ids = set()
@@ -411,6 +453,10 @@ async def specific_team_message_handler(update: Update, context: ContextTypes.DE
     return CONFIRMATION
 
 async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handler for '-team' command. Sends a message to the user's own role and the Tara Team.
+    If the user has multiple roles, prompts them to pick one.
+    """
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
@@ -433,6 +479,10 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return TEAM_MESSAGE
 
 async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handles the actual text/document message for '-team' trigger.
+    Sends a confirmation to forward the message to the user's role and Tara Team.
+    """
     message = update.message
     user_id = message.from_user.id
     selected_role = context.user_data.get('sender_role')
@@ -441,7 +491,7 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await message.reply_text("An error occurred. Please try again.")
         return ConversationHandler.END
 
-    # For '-team' only sender’s own role and Tara Team
+    # For '-team', only sender’s own role and Tara Team
     target_roles = [selected_role, 'tara_team']
     target_ids = set()
     for role in target_roles:
@@ -457,6 +507,10 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     return CONFIRMATION
 
 async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Callback query handler for users with multiple roles.
+    When a user selects a role, the pending message is processed accordingly.
+    """
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -472,7 +526,7 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         del context.user_data['pending_message']
 
-        # Check if from '-team'
+        # Check if the user used '-team'
         command_text = pending_message.text.strip().lower() if pending_message.text else ""
         if command_text == '-team':
             target_roles = [selected_role, 'tara_team']
@@ -500,6 +554,9 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
 async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handler for '-t' command. Sends a message exclusively to the Tara Team.
+    """
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
@@ -512,6 +569,10 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return TARA_MESSAGE
 
 async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handles the actual message for '-t' command.
+    Sends a confirmation before forwarding the message to Tara Team.
+    """
     message = update.message
     user_id = message.from_user.id
     sender_role = context.user_data.get('sender_role')
@@ -532,6 +593,10 @@ async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     return CONFIRMATION
 
 async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handler for general messages that don't match any specific command or trigger.
+    If the user has multiple roles, prompts them to select one for sending a message.
+    """
     message = update.message
     if not message:
         return ConversationHandler.END
@@ -583,6 +648,10 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
 # ------------------ Command Handlers ------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /start command handler.
+    Registers or refreshes the user's ID under their username, and welcomes them.
+    """
     user = update.effective_user
     if not user.username:
         await update.message.reply_text(
@@ -602,6 +671,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /listusers command handler.
+    Lists all users who have interacted with the bot (Tara Team only).
+    """
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
@@ -617,6 +690,10 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"**Registered Users:**\n{user_list}", parse_mode='Markdown')
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /help command handler.
+    Displays a list of available commands and usage instructions.
+    """
     help_text = (
         "📘 *Available Commands:*\n\n"
         "/start - Initialize interaction with the bot.\n"
@@ -647,6 +724,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /refresh command handler.
+    Refreshes the user's information (Telegram username -> Telegram user ID).
+    """
     user = update.effective_user
     if not user.username:
         await update.message.reply_text(
@@ -662,6 +743,10 @@ async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Your information has been refreshed successfully.")
 
 async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /mute command handler.
+    Mutes the user themselves or another user (Tara Team only).
+    """
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
@@ -706,9 +791,16 @@ async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"User ID {target_user_id} has been muted.")
 
 async def mute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /muteid command handler (alias of /mute).
+    """
     await mute_command(update, context)
 
 async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /unmuteid command handler.
+    Unmutes a specific user by their ID (Tara Team only).
+    """
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
@@ -744,6 +836,10 @@ async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"User ID {target_user_id} is not muted.")
 
 async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /listmuted command handler.
+    Lists all currently muted users (Tara Team only).
+    """
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
@@ -826,11 +922,19 @@ general_conv_handler = ConversationHandler(
 )
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Global error handler for the application.
+    Logs exceptions and notifies the user of an error.
+    """
     logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
     if isinstance(update, Update) and update.message:
         await update.message.reply_text("An error occurred. Please try again later.")
 
 def main():
+    """
+    Main entry point of the bot application.
+    Initializes the bot, registers command handlers, conversation handlers, and starts polling.
+    """
     BOT_TOKEN = os.getenv('BOT_TOKEN')
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN is not set in environment variables.")
