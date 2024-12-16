@@ -1,22 +1,17 @@
-# Use an official Python runtime as a parent image
+# Use a lightweight Python base image
 FROM python:3.9-slim
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-# Suppress PTBUserWarning
-ENV PYTHONWARNINGS="ignore"
-
-# Set work directory
+# Create and set the working directory in the container
 WORKDIR /app
 
-# Install dependencies
+# Copy only requirements first for Docker layer caching
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Copy project
+# Install dependencies without caching
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the code
 COPY . .
 
-# Run the application
+# Final command to run the bot
 CMD ["python", "main.py"]
