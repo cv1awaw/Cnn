@@ -4,6 +4,24 @@ import re
 import json
 import uuid
 from pathlib import Path
+import sys
+
+# Attempt to import roles. If roles.py is missing, show an error and exit.
+try:
+    from roles import (
+        WRITER_IDS,
+        MCQS_TEAM_IDS,
+        CHECKER_TEAM_IDS,
+        WORD_TEAM_IDS,
+        DESIGN_TEAM_IDS,
+        KING_TEAM_IDS,
+        TARA_TEAM_IDS,
+        MIND_MAP_FORM_CREATOR_IDS,
+    )
+except ModuleNotFoundError:
+    print("ERROR: 'roles.py' not found. Please ensure roles.py is included in your environment or deployment.")
+    sys.exit(1)
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -14,25 +32,14 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
 )
-from roles import (
-    WRITER_IDS,
-    MCQS_TEAM_IDS,
-    CHECKER_TEAM_IDS,
-    WORD_TEAM_IDS,
-    DESIGN_TEAM_IDS,
-    KING_TEAM_IDS,
-    TARA_TEAM_IDS,
-    MIND_MAP_FORM_CREATOR_IDS,
-)
 
 import uvloop
 import asyncio
 
 # ------------------ Setup Logging ------------------
-# Change level to WARNING to reduce output
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.WARNING
+    level=logging.WARNING  # Reduced log level for faster container start
 )
 logger = logging.getLogger(__name__)
 
@@ -105,10 +112,8 @@ if USER_DATA_FILE.exists():
         try:
             user_data_store = json.load(f)
             user_data_store = {k.lower(): v for k, v in user_data_store.items()}
-            # logger.info("Loaded existing user data from user_data.json.")
         except json.JSONDecodeError:
             user_data_store = {}
-            # logger.error("user_data.json is not a valid JSON file. Starting with an empty data store.")
 else:
     user_data_store = {}
 
@@ -116,7 +121,6 @@ def save_user_data():
     try:
         with open(USER_DATA_FILE, 'w') as f:
             json.dump(user_data_store, f)
-            # logger.info("Saved user data to user_data.json.")
     except Exception as e:
         logger.warning(f"Failed to save user data: {e}")
 
@@ -133,10 +137,8 @@ if MUTED_USERS_FILE.exists():
     with open(MUTED_USERS_FILE, 'r') as f:
         try:
             muted_users = set(json.load(f))
-            # logger.info("Loaded existing muted users from muted_users.json.")
         except json.JSONDecodeError:
             muted_users = set()
-            # logger.error("muted_users.json is not a valid JSON file. Starting with an empty muted users set.")
 else:
     muted_users = set()
 
@@ -144,7 +146,6 @@ def save_muted_users():
     try:
         with open(MUTED_USERS_FILE, 'w') as f:
             json.dump(list(muted_users), f)
-            # logger.info("Saved muted users to muted_users.json.")
     except Exception as e:
         logger.warning(f"Failed to save muted users: {e}")
 
@@ -194,22 +195,18 @@ async def forward_message(bot, message, target_ids, sender_role):
                     caption=caption + (f"\n\n{message.caption}" if message.caption else ""),
                     parse_mode='Markdown'
                 )
-                # logger.info(f"Forwarded document {message.document.file_id} to {user_id}")
             elif message.text:
                 await bot.send_message(
                     chat_id=user_id,
                     text=f"{caption}\n\n{message.text}",
                     parse_mode='Markdown'
                 )
-                # logger.info(f"Forwarded text message to {user_id}")
             else:
                 await bot.forward_message(
                     chat_id=user_id,
                     from_chat_id=message.chat.id,
                     message_id=message.message_id
                 )
-                # logger.info(f"Forwarded message {message.message_id} to {user_id}")
-
         except Exception as e:
             logger.warning(f"Failed to forward message or send role notification to {user_id}: {e}")
 
@@ -663,10 +660,10 @@ specific_user_conv_handler = ConversationHandler(
         specific_user_trigger
     )],
     states={
-        SPECIFIC_USER_MESSAGE: [
+        3: [
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)
         ],
-        CONFIRMATION: [
+        5: [
             CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')
         ],
     },
@@ -680,10 +677,10 @@ specific_team_conv_handler = ConversationHandler(
         specific_team_trigger
     )],
     states={
-        SPECIFIC_TEAM_MESSAGE: [
+        2: [
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)
         ],
-        CONFIRMATION: [
+        5: [
             CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')
         ],
     },
@@ -697,13 +694,13 @@ team_conv_handler = ConversationHandler(
         team_trigger
     )],
     states={
-        TEAM_MESSAGE: [
+        1: [
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)
         ],
-        SELECT_ROLE: [
+        6: [
             CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')
         ],
-        CONFIRMATION: [
+        5: [
             CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')
         ],
     },
@@ -717,10 +714,10 @@ tara_conv_handler = ConversationHandler(
         tara_trigger
     )],
     states={
-        TARA_MESSAGE: [
+        4: [
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)
         ],
-        CONFIRMATION: [
+        5: [
             CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')
         ],
     },
@@ -737,10 +734,10 @@ general_conv_handler = ConversationHandler(
         handle_general_message
     )],
     states={
-        SELECT_ROLE: [
+        6: [
             CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')
         ],
-        CONFIRMATION: [
+        5: [
             CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')
         ],
     },
@@ -978,7 +975,6 @@ def main():
 
     application.add_error_handler(error_handler)
 
-    # logger.info("Bot started polling...")
     application.run_polling()
 
 if __name__ == '__main__':
