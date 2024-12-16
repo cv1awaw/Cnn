@@ -73,7 +73,8 @@ SENDING_ROLE_TARGETS = {
     'writer': ['mcqs_team', 'checker_team', 'tara_team'],
     'mcqs_team': ['design_team', 'tara_team'],
     'checker_team': ['tara_team', 'word_team'],
-    'word_team': ['tara_team'],
+    # Update for word_team to also send to design_team:
+    'word_team': ['tara_team', 'design_team'],
     'design_team': ['tara_team', 'king_team'],
     'king_team': ['tara_team'],
     'tara_team': ['writer', 'mcqs_team', 'checker_team', 'word_team', 'design_team', 'king_team', 'tara_team', 'mind_map_form_creator'],
