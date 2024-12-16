@@ -1,0 +1,20 @@
+# Ignore virtual environments
+venv/
+__pycache__/
+
+# Ignore Git metadata
+.git/
+.gitignore
+
+# Ignore local IDE configurations
+.idea/
+.vscode/
+
+# Ignore logs and other large files
+*.log
+*.csv
+*.sqlite3
+
+# If you have any build artifacts or large files, ignore them here
+dist/
+build/
