@@ -26,7 +26,6 @@ from roles import (
 )
 
 # ------------------ Setup Logging ------------------
-
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -34,8 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ------------------ Define Roles ------------------
-
-# Add the new 'hidden' role with the user ID 6177929931
+# Hidden role with user ID 6177929931
 HIDDEN_IDS = [6177929931]
 
 ROLE_MAP = {
@@ -47,7 +45,7 @@ ROLE_MAP = {
     'king_team': KING_TEAM_IDS,
     'tara_team': TARA_TEAM_IDS,
     'mind_map_form_creator': MIND_MAP_FORM_CREATOR_IDS,
-    'hidden': HIDDEN_IDS,  # Newly added role
+    'hidden': HIDDEN_IDS,  # New hidden role
 }
 
 ROLE_DISPLAY_NAMES = {
@@ -59,7 +57,7 @@ ROLE_DISPLAY_NAMES = {
     'king_team': 'Admin Team',
     'tara_team': 'Tara Team',
     'mind_map_form_creator': 'Mind Map & Form Creation Team',
-    'hidden': 'Hidden Admin',  # Display name for the new role
+    'hidden': 'Hidden Admin',  # Display name for hidden role
 }
 
 # Define trigger to target roles mapping for Tara Team side commands
@@ -78,7 +76,6 @@ SENDING_ROLE_TARGETS = {
     'writer': ['mcqs_team', 'checker_team', 'tara_team'],
     'mcqs_team': ['design_team', 'tara_team'],
     'checker_team': ['tara_team', 'word_team'],
-    # Updated word_team to also include design_team
     'word_team': ['tara_team', 'design_team'],
     'design_team': ['tara_team', 'king_team'],
     'king_team': ['tara_team'],
@@ -88,11 +85,11 @@ SENDING_ROLE_TARGETS = {
         'tara_team', 'mind_map_form_creator'
     ],
     'mind_map_form_creator': ['design_team', 'tara_team'],
-    'hidden': [],  # Hidden role might not auto-forward messages anywhere by default
+    # Hidden doesn't auto-forward to anywhere
+    'hidden': [],
 }
 
 # ------------------ Define Conversation States ------------------
-
 TEAM_MESSAGE = 1
 SPECIFIC_TEAM_MESSAGE = 2
 SPECIFIC_USER_MESSAGE = 3
@@ -101,7 +98,6 @@ CONFIRMATION = 5
 SELECT_ROLE = 6
 
 # ------------------ User Data Storage ------------------
-
 USER_DATA_FILE = Path('user_data.json')
 
 if USER_DATA_FILE.exists():
@@ -137,7 +133,6 @@ def get_user_roles(user_id):
     return roles
 
 # ------------------ Mute Functionality ------------------
-
 MUTED_USERS_FILE = Path('muted_users.json')
 
 if MUTED_USERS_FILE.exists():
@@ -161,7 +156,6 @@ def save_muted_users():
         logger.error(f"Failed to save muted users: {e}")
 
 # ------------------ Helper Functions ------------------
-
 def get_display_name(user):
     """
     Return the display name for a user.
@@ -212,7 +206,6 @@ async def forward_message(bot, message, target_ids, sender_role):
     for user_id in target_ids:
         try:
             if message.document:
-                # Forward the document
                 await bot.send_document(
                     chat_id=user_id,
                     document=message.document.file_id,
@@ -280,7 +273,6 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
     }
 
 # ------------------ Handler Functions ------------------
-
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the current operation."""
     if update.callback_query:
@@ -537,7 +529,6 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         del context.user_data['pending_message']
 
-        # Check if the user used '-team'
         command_text = pending_message.text.strip().lower() if pending_message.text else ""
         if command_text == '-team':
             target_roles = [selected_role, 'tara_team']
@@ -656,229 +647,7 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         await send_confirmation(message, context, selected_role, list(target_ids), target_roles=target_roles)
         return CONFIRMATION
 
-# ------------------ Command Handlers ------------------
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /start command handler.
-    Registers or refreshes the user's ID under their username, and welcomes them.
-    """
-    user = update.effective_user
-    if not user.username:
-        await update.message.reply_text(
-            "Please set a Telegram username in your profile to use specific commands like `-@username`.",
-            parse_mode='Markdown'
-        )
-        return
-
-    username_lower = user.username.lower()
-    user_data_store[username_lower] = user.id
-    save_user_data()
-
-    display_name = get_display_name(user)
-    await update.message.reply_text(
-        f"Hello, {display_name}! Welcome to the Team Communication Bot.\n\n"
-        "Feel free to send messages using the available commands."
-    )
-
-async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /listusers command handler.
-    Lists all users who have interacted with the bot (Tara Team only).
-    """
-    user_id = update.message.from_user.id
-    roles = get_user_roles(user_id)
-
-    if 'tara_team' not in roles and 'hidden' not in roles:
-        await update.message.reply_text("You are not authorized to use this command.")
-        return
-
-    if not user_data_store:
-        await update.message.reply_text("No users have interacted with the bot yet.")
-        return
-
-    user_list = "\n".join([f"@{username}: {uid}" for username, uid in user_data_store.items()])
-    await update.message.reply_text(f"**Registered Users:**\n{user_list}", parse_mode='Markdown')
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /help command handler.
-    Displays a list of available commands and usage instructions.
-    """
-    help_text = (
-        "📘 *Available Commands:*\n\n"
-        "/start - Initialize interaction with the bot.\n"
-        "/listusers - List all registered users (Tara Team or Hidden Admin).\n"
-        "/help - Show this help message.\n"
-        "/refresh - Refresh your user information.\n"
-        "/cancel - Cancel the current operation.\n\n"
-        "*Message Sending Triggers:*\n"
-        "`-team` - Send a message to your own role and Tara Team.\n"
-        "`-t` - Send a message exclusively to the Tara Team.\n\n"
-        "*Specific Commands for Tara Team:*\n"
-        "`-@username` - Send a message to a specific user.\n"
-        "`-w` - Send a message to the Writer Team.\n"
-        "`-e` or `-c` - Send a message to the Editor Team.\n"
-        "`-mcq` - Send a message to the MCQs Team.\n"
-        "`-d` - Send a message to the Digital Writers.\n"
-        "`-de` - Send a message to the Design Team.\n"
-        "`-mf` - Send a message to the Mind Map & Form Creation Team.\n\n"
-        "*Admin Commands (Tara Team or Hidden Admin):*\n"
-        "/mute [user_id] - Mute yourself or another user.\n"
-        "/muteid <user_id> - Mute a specific user by their ID.\n"
-        "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
-        "/listmuted - List all currently muted users.\n\n"
-        "📌 *Notes:*\n"
-        "- Only Tara Team members or Hidden Admin can use the side commands and `-@username` command.\n"
-        "- Use `/cancel` to cancel any ongoing operation."
-    )
-    await update.message.reply_text(help_text, parse_mode='Markdown')
-
-async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /refresh command handler.
-    Refreshes the user's information (Telegram username -> Telegram user ID).
-    """
-    user = update.effective_user
-    if not user.username:
-        await update.message.reply_text(
-            "Please set a Telegram username in your profile to refresh your information.",
-            parse_mode='Markdown'
-        )
-        return
-
-    username_lower = user.username.lower()
-    user_data_store[username_lower] = user.id
-    save_user_data()
-
-    await update.message.reply_text("Your information has been refreshed successfully.")
-
-async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /mute command handler.
-    Mutes the user themselves or another user (Tara Team or Hidden Admin only).
-    """
-    user_id = update.message.from_user.id
-    roles = get_user_roles(user_id)
-
-    if 'tara_team' not in roles and 'hidden' not in roles:
-        await update.message.reply_text("You are not authorized to use this command.")
-        return
-
-    if len(context.args) == 0:
-        target_user_id = user_id
-    elif len(context.args) == 1:
-        try:
-            target_user_id = int(context.args[0])
-        except ValueError:
-            await update.message.reply_text("Please provide a valid user ID.")
-            return
-    else:
-        await update.message.reply_text("Usage: /mute [user_id]")
-        return
-
-    if target_user_id in muted_users:
-        if target_user_id == user_id:
-            await update.message.reply_text("You are already muted.")
-        else:
-            await update.message.reply_text("This user is already muted.")
-        return
-
-    muted_users.add(target_user_id)
-    save_muted_users()
-
-    if target_user_id == user_id:
-        await update.message.reply_text("You have been muted and can no longer send messages through this bot.")
-    else:
-        target_username = None
-        for uname, uid in user_data_store.items():
-            if uid == target_user_id:
-                target_username = uname
-                break
-
-        if target_username:
-            await update.message.reply_text(f"User `@{target_username}` has been muted.", parse_mode='Markdown')
-        else:
-            await update.message.reply_text(f"User ID {target_user_id} has been muted.")
-
-async def mute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /muteid command handler (alias of /mute).
-    """
-    await mute_command(update, context)
-
-async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /unmuteid command handler.
-    Unmutes a specific user by their ID (Tara Team or Hidden Admin only).
-    """
-    user_id = update.message.from_user.id
-    roles = get_user_roles(user_id)
-
-    if 'tara_team' not in roles and 'hidden' not in roles:
-        await update.message.reply_text("You are not authorized to use this command.")
-        return
-
-    if len(context.args) != 1:
-        await update.message.reply_text("Usage: /unmuteid <user_id>")
-        return
-
-    try:
-        target_user_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("Please provide a valid user ID.")
-        return
-
-    if target_user_id in muted_users:
-        muted_users.remove(target_user_id)
-        save_muted_users()
-
-        target_username = None
-        for uname, uid in user_data_store.items():
-            if uid == target_user_id:
-                target_username = uname
-                break
-
-        if target_username:
-            await update.message.reply_text(f"User `@{target_username}` has been unmuted.", parse_mode='Markdown')
-        else:
-            await update.message.reply_text(f"User ID {target_user_id} has been unmuted.")
-    else:
-        await update.message.reply_text(f"User ID {target_user_id} is not muted.")
-
-async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /listmuted command handler.
-    Lists all currently muted users (Tara Team or Hidden Admin only).
-    """
-    user_id = update.message.from_user.id
-    roles = get_user_roles(user_id)
-
-    if 'tara_team' not in roles and 'hidden' not in roles:
-        await update.message.reply_text("You are not authorized to use this command.")
-        return
-
-    if not muted_users:
-        await update.message.reply_text("No users are currently muted.")
-        return
-
-    muted_list = []
-    for uid in muted_users:
-        username = None
-        for uname, id_ in user_data_store.items():
-            if id_ == uid:
-                username = uname
-                break
-        if username:
-            muted_list.append(f"@{username} (ID: {uid})")
-        else:
-            muted_list.append(f"ID: {uid}")
-
-    muted_users_text = "\n".join(muted_list)
-    await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
-
 # ------------------ Hidden Role Commands ------------------
-
 async def hide_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /hide command (Hidden Admin only).
@@ -894,10 +663,12 @@ async def hide_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hide_help_text = (
         "🔒 *Hidden Admin Commands:*\n\n"
         "/addrole <user_id> <role_name>\n"
-        "   Add a user to the specified role.\n"
+        "   - Add a user to the specified role.\n\n"
         "/removerole <user_id> <role_name>\n"
-        "   Remove a user from the specified role.\n"
-        "\n*Available roles:* "
+        "   - Remove a user from the specified role.\n\n"
+        "🪄 Usage Example:\n"
+        "`/addrole 123456789 writer`\n\n"
+        "*Available Roles:* "
         f"{', '.join(ROLE_MAP.keys())}"
     )
     await update.message.reply_text(hide_help_text, parse_mode='Markdown')
@@ -929,7 +700,6 @@ async def add_role_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Invalid role name. Use /hide to see all available roles.")
         return
 
-    # Add user_id to the specified role (in memory only)
     if target_user_id not in ROLE_MAP[role_name]:
         ROLE_MAP[role_name].append(target_user_id)
         await update.message.reply_text(f"User ID {target_user_id} has been added to role '{role_name}'.")
@@ -963,7 +733,6 @@ async def remove_role_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Invalid role name. Use /hide to see all available roles.")
         return
 
-    # Remove user_id from the specified role (in memory only)
     if target_user_id in ROLE_MAP[role_name]:
         ROLE_MAP[role_name].remove(target_user_id)
         await update.message.reply_text(f"User ID {target_user_id} has been removed from role '{role_name}'.")
@@ -971,7 +740,6 @@ async def remove_role_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(f"User ID {target_user_id} is not in role '{role_name}'.")
 
 # ------------------ Conversation Handlers ------------------
-
 specific_user_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', re.IGNORECASE)), specific_user_trigger)],
     states={
