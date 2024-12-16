@@ -29,9 +29,10 @@ import uvloop
 import asyncio
 
 # ------------------ Setup Logging ------------------
+# Change level to WARNING to reduce output
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.WARNING
 )
 logger = logging.getLogger(__name__)
 
@@ -104,10 +105,10 @@ if USER_DATA_FILE.exists():
         try:
             user_data_store = json.load(f)
             user_data_store = {k.lower(): v for k, v in user_data_store.items()}
-            logger.info("Loaded existing user data from user_data.json.")
+            # logger.info("Loaded existing user data from user_data.json.")
         except json.JSONDecodeError:
             user_data_store = {}
-            logger.error("user_data.json is not a valid JSON file. Starting with an empty data store.")
+            # logger.error("user_data.json is not a valid JSON file. Starting with an empty data store.")
 else:
     user_data_store = {}
 
@@ -115,9 +116,9 @@ def save_user_data():
     try:
         with open(USER_DATA_FILE, 'w') as f:
             json.dump(user_data_store, f)
-            logger.info("Saved user data to user_data.json.")
+            # logger.info("Saved user data to user_data.json.")
     except Exception as e:
-        logger.error(f"Failed to save user data: {e}")
+        logger.warning(f"Failed to save user data: {e}")
 
 def get_user_roles(user_id):
     roles = []
@@ -132,10 +133,10 @@ if MUTED_USERS_FILE.exists():
     with open(MUTED_USERS_FILE, 'r') as f:
         try:
             muted_users = set(json.load(f))
-            logger.info("Loaded existing muted users from muted_users.json.")
+            # logger.info("Loaded existing muted users from muted_users.json.")
         except json.JSONDecodeError:
             muted_users = set()
-            logger.error("muted_users.json is not a valid JSON file. Starting with an empty muted users set.")
+            # logger.error("muted_users.json is not a valid JSON file. Starting with an empty muted users set.")
 else:
     muted_users = set()
 
@@ -143,9 +144,9 @@ def save_muted_users():
     try:
         with open(MUTED_USERS_FILE, 'w') as f:
             json.dump(list(muted_users), f)
-            logger.info("Saved muted users to muted_users.json.")
+            # logger.info("Saved muted users to muted_users.json.")
     except Exception as e:
-        logger.error(f"Failed to save muted users: {e}")
+        logger.warning(f"Failed to save muted users: {e}")
 
 # ------------------ Helper Functions ------------------
 def get_display_name(user):
@@ -193,24 +194,24 @@ async def forward_message(bot, message, target_ids, sender_role):
                     caption=caption + (f"\n\n{message.caption}" if message.caption else ""),
                     parse_mode='Markdown'
                 )
-                logger.info(f"Forwarded document {message.document.file_id} to {user_id}")
+                # logger.info(f"Forwarded document {message.document.file_id} to {user_id}")
             elif message.text:
                 await bot.send_message(
                     chat_id=user_id,
                     text=f"{caption}\n\n{message.text}",
                     parse_mode='Markdown'
                 )
-                logger.info(f"Forwarded text message to {user_id}")
+                # logger.info(f"Forwarded text message to {user_id}")
             else:
                 await bot.forward_message(
                     chat_id=user_id,
                     from_chat_id=message.chat.id,
                     message_id=message.message_id
                 )
-                logger.info(f"Forwarded message {message.message_id} to {user_id}")
+                # logger.info(f"Forwarded message {message.message_id} to {user_id}")
 
         except Exception as e:
-            logger.error(f"Failed to forward message or send role notification to {user_id}: {e}")
+            logger.warning(f"Failed to forward message or send role notification to {user_id}: {e}")
 
 async def send_confirmation(message, context, sender_role, target_ids, target_roles=None):
     if message.document:
@@ -577,7 +578,6 @@ async def hide_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
-    # Build the "roles_formatted" string by escaping underscores separately
     escaped_roles = []
     for r in ROLE_MAP.keys():
         role_escaped = r.replace('_', '\\_')
@@ -942,7 +942,7 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # ------------------ Error Handler ------------------
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
+    logger.warning(f"Exception while handling an update: {context.error}", exc_info=True)
     if isinstance(update, Update) and update.message:
         await update.message.reply_text("An error occurred. Please try again later.")
 
@@ -978,7 +978,7 @@ def main():
 
     application.add_error_handler(error_handler)
 
-    logger.info("Bot started polling...")
+    # logger.info("Bot started polling...")
     application.run_polling()
 
 if __name__ == '__main__':
