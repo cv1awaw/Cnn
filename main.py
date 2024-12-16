@@ -574,8 +574,14 @@ async def hide_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
-    # Escape underscores in role names for safe Markdown parsing
-    roles_formatted = ', '.join([f'`{r.replace("_", "\\_")}`' for r in ROLE_MAP.keys()])
+    # Build the "roles_formatted" string by escaping underscores separately
+    escaped_roles = []
+    for r in ROLE_MAP.keys():
+        # Replace underscores with '\_', which Telegram interprets correctly in Markdown
+        # Note that we're doubling the backslash to ensure the final string contains '\_'
+        role_escaped = r.replace('_', '\\_')
+        escaped_roles.append(f'`{role_escaped}`')
+    roles_formatted = ', '.join(escaped_roles)
 
     hide_help_text = (
         "🔒 *Hidden Admin Commands:*\n\n"
