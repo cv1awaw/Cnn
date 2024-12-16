@@ -937,10 +937,9 @@ def main():
     """
     BOT_TOKEN = os.getenv('BOT_TOKEN')
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN is not set in environment variables.")
-        return
+        logger.warning("BOT_TOKEN is not set in environment variables. Attempting to run anyway...")
 
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application = ApplicationBuilder().token(BOT_TOKEN if BOT_TOKEN else "").build()
 
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('listusers', list_users))
