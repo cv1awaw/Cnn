@@ -1,17 +1,17 @@
-# Use a lightweight Python base image
+# Use a slim base image
 FROM python:3.9-slim
 
-# Create and set the working directory in the container
+# Create a working directory
 WORKDIR /app
 
-# Copy only requirements first for Docker layer caching
+# Copy only requirements to leverage caching
 COPY requirements.txt .
 
-# Install dependencies without caching
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the code
+# Copy the rest of the source code
 COPY . .
 
-# Final command to run the bot
+# Final command
 CMD ["python", "main.py"]
