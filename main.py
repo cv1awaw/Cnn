@@ -374,7 +374,6 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
 
     message_text = update.message.text.strip().lower()
     target_roles = TRIGGER_TARGET_MAP.get(message_text)
-
     if not target_roles:
         await update.message.reply_text("Invalid trigger. Please try again.")
         return ConversationHandler.END
@@ -575,6 +574,9 @@ async def hide_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
+    # Escape underscores in role names for safe Markdown parsing
+    roles_formatted = ', '.join([f'`{r.replace("_", "\\_")}`' for r in ROLE_MAP.keys()])
+
     hide_help_text = (
         "🔒 *Hidden Admin Commands:*\n\n"
         "/addrole <user_id> <role_name>\n"
@@ -584,8 +586,9 @@ async def hide_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🪄 Example:\n"
         "`/addrole 123456789 writer`\n\n"
         "*Available Roles:* "
-        f"{', '.join(ROLE_MAP.keys())}"
+        f"{roles_formatted}"
     )
+
     await update.message.reply_text(hide_help_text, parse_mode='Markdown')
 
 async def add_role_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -741,10 +744,6 @@ general_conv_handler = ConversationHandler(
 
 # ------------------ Start Command Definition ------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    The /start command handler that was missing before.
-    Registers or refreshes the user's ID under their username, and welcomes them.
-    """
     user = update.effective_user
     if not user.username:
         await update.message.reply_text(
