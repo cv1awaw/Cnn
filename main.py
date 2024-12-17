@@ -88,6 +88,7 @@ SPECIFIC_USER_MESSAGE = 3
 TARA_MESSAGE = 4
 CONFIRMATION = 5
 SELECT_ROLE = 6
+# NO extra state needed; we’ll reuse CONFIRMATION for no-role feedback
 
 # ------------------ User Data Storage ------------------
 
@@ -175,6 +176,10 @@ def get_role_selection_keyboard(roles):
     return InlineKeyboardMarkup(keyboard)
 
 async def forward_message(bot, message, target_ids, sender_role):
+    """
+    Forward or copy a message to the specified target_ids. 
+    This includes the original sender's display name and role.
+    """
     sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
     username_display = get_display_name(message.from_user)
 
@@ -188,7 +193,6 @@ async def forward_message(bot, message, target_ids, sender_role):
     for user_id in target_ids:
         try:
             if message.document:
-                # Forward the document
                 await bot.send_document(
                     chat_id=user_id,
                     document=message.document.file_id,
@@ -214,9 +218,41 @@ async def forward_message(bot, message, target_ids, sender_role):
         except Exception as e:
             logger.error(f"Failed to forward message or send role notification to {user_id}: {e}")
 
+async def forward_anonymous_message(bot, message, target_ids):
+    """
+    Forward or copy a message to the specified target_ids 
+    *without* revealing the sender's username or role.
+    """
+    for user_id in target_ids:
+        try:
+            if message.document:
+                await bot.send_document(
+                    chat_id=user_id,
+                    document=message.document.file_id,
+                    caption="🔄 *Anonymous feedback.*" + (f"\n\n{message.caption}" if message.caption else ""),
+                    parse_mode='Markdown'
+                )
+            elif message.text:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=f"🔄 *Anonymous feedback.*\n\n{message.text}",
+                    parse_mode='Markdown'
+                )
+            else:
+                await bot.forward_message(
+                    chat_id=user_id,
+                    from_chat_id=message.chat.id,
+                    message_id=message.message_id
+                )
+        except Exception as e:
+            logger.error(f"Failed to forward anonymous feedback to {user_id}: {e}")
+
 async def send_confirmation(message, context, sender_role, target_ids, target_roles=None):
+    """
+    Send a confirm/cancel inline keyboard for a given message, 
+    storing the necessary data in context.user_data for follow-up.
+    """
     if message.document:
-        # Treat any document as PDF for this scenario
         content_description = f"PDF: `{message.document.file_name}`"
     elif message.text:
         content_description = f"Message: `{message.text}`"
@@ -266,6 +302,35 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     data = query.data
 
+    # Special check for anonymous feedback (no roles)
+    if data.startswith('confirm_no_role:'):
+        try:
+            _, confirmation_uuid = data.split(':', 1)
+        except ValueError:
+            await query.edit_message_text("Invalid confirmation data. Please try again.")
+            return ConversationHandler.END
+
+        confirm_data = context.user_data.get(f'confirm_{confirmation_uuid}')
+        if not confirm_data:
+            await query.edit_message_text("An error occurred. Please try again.")
+            return ConversationHandler.END
+
+        message_to_send = confirm_data['message']
+        # Gather all user_ids from all roles except the sender
+        all_target_ids = set()
+        for role_ids in ROLE_MAP.values():
+            all_target_ids.update(role_ids)
+        if message_to_send.from_user.id in all_target_ids:
+            all_target_ids.remove(message_to_send.from_user.id)
+
+        # Forward the message anonymously
+        await forward_anonymous_message(context.bot, message_to_send, list(all_target_ids))
+        await query.edit_message_text("✅ *Your anonymous feedback has been sent to all teams.*", parse_mode='Markdown')
+
+        del context.user_data[f'confirm_{confirmation_uuid}']
+        return ConversationHandler.END
+
+    # Normal confirm/cancel logic
     if data.startswith('confirm:') or data.startswith('cancel:'):
         try:
             action, confirmation_uuid = data.split(':', 1)
@@ -415,8 +480,9 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     roles = get_user_roles(user_id)
 
     if not roles:
-        await update.message.reply_text("You don't have a role assigned to use this bot.")
-        return ConversationHandler.END
+        # If user has no roles, handle in general message or do direct flow
+        # We'll let handle_general_message do the no-role logic
+        return await handle_general_message(update, context)
 
     if len(roles) > 1:
         keyboard = get_role_selection_keyboard(roles)
@@ -441,7 +507,6 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await message.reply_text("An error occurred. Please try again.")
         return ConversationHandler.END
 
-    # For '-team' only sender’s own role and Tara Team
     target_roles = [selected_role, 'tara_team']
     target_ids = set()
     for role in target_roles:
@@ -472,7 +537,6 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         del context.user_data['pending_message']
 
-        # Check if from '-team'
         command_text = pending_message.text.strip().lower() if pending_message.text else ""
         if command_text == '-team':
             target_roles = [selected_role, 'tara_team']
@@ -504,8 +568,8 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     roles = get_user_roles(user_id)
 
     if not roles:
-        await update.message.reply_text("You don't have a role assigned to use this bot.")
-        return ConversationHandler.END
+        # If user has no roles, handle in general message or do direct flow
+        return await handle_general_message(update, context)
 
     context.user_data['sender_role'] = roles[0]
     await update.message.reply_text("Write your message for the Tara Team.")
@@ -517,7 +581,6 @@ async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     sender_role = context.user_data.get('sender_role')
 
     if not sender_role:
-        await message.reply_text("You don't have a role assigned to use this bot.")
         return ConversationHandler.END
 
     target_roles = ['tara_team']
@@ -551,9 +614,30 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
             save_user_data()
 
     roles = get_user_roles(user_id)
+    # -----------------------------------------
+    # NEW LOGIC FOR NO-ROLE (ANONYMOUS FEEDBACK)
+    # -----------------------------------------
     if not roles:
-        await message.reply_text("You don't have a role assigned to use this bot.")
-        return ConversationHandler.END
+        # This user has no assigned roles. Ask for confirmation to send anonymous feedback.
+        confirmation_uuid = str(uuid.uuid4())
+        context.user_data[f'confirm_{confirmation_uuid}'] = {
+            'message': message,
+            'sender_role': 'no_role'
+        }
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Send feedback", callback_data=f'confirm_no_role:{confirmation_uuid}'),
+                InlineKeyboardButton("❌ Cancel", callback_data=f'cancel:{confirmation_uuid}'),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await message.reply_text(
+            "You have no roles. Do you want to send this as *anonymous feedback* to all teams?",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+        return CONFIRMATION
+    # -----------------------------------------
 
     if len(roles) > 1:
         keyboard = get_role_selection_keyboard(roles)
@@ -641,8 +725,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
         "/listmuted - List all currently muted users.\n\n"
         "📌 *Notes:*\n"
-        "- Only Tara Team members can use the side commands and `-@username` command.\n"
-        "- Use `/cancel` to cancel any ongoing operation."
+        "- Only Tara Team members can use side commands and `-@username` command.\n"
+        "- Use `/cancel` to cancel any ongoing operation.\n"
+        "- If you have *no role*, you can send anonymous feedback to all teams."
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -776,7 +861,7 @@ specific_user_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', re.IGNORECASE)), specific_user_trigger)],
     states={
         SPECIFIC_USER_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -785,7 +870,7 @@ specific_team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|c)$', re.IGNORECASE)), specific_team_trigger)],
     states={
         SPECIFIC_TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -795,7 +880,7 @@ team_conv_handler = ConversationHandler(
     states={
         TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)],
         SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -804,7 +889,7 @@ tara_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-t$', re.IGNORECASE)), tara_trigger)],
     states={
         TARA_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -819,7 +904,7 @@ general_conv_handler = ConversationHandler(
     )],
     states={
         SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:).*')],
+        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
