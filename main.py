@@ -76,7 +76,16 @@ SENDING_ROLE_TARGETS = {
     'word_team': ['tara_team'],
     'design_team': ['tara_team', 'king_team'],
     'king_team': ['tara_team'],
-    'tara_team': ['writer', 'mcqs_team', 'checker_team', 'word_team', 'design_team', 'king_team', 'tara_team', 'mind_map_form_creator'],
+    'tara_team': [
+        'writer',
+        'mcqs_team',
+        'checker_team',
+        'word_team',
+        'design_team',
+        'king_team',
+        'tara_team',
+        'mind_map_form_creator'
+    ],
     'mind_map_form_creator': ['design_team', 'tara_team']
 }
 
@@ -88,7 +97,7 @@ SPECIFIC_USER_MESSAGE = 3
 TARA_MESSAGE = 4
 CONFIRMATION = 5
 SELECT_ROLE = 6
-# NO extra state needed; we’ll reuse CONFIRMATION for no-role feedback
+# We reuse CONFIRMATION for no-role feedback.
 
 # ------------------ User Data Storage ------------------
 
@@ -316,16 +325,35 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             return ConversationHandler.END
 
         message_to_send = confirm_data['message']
+        user_id = message_to_send.from_user.id
+        special_user_id = 6177929931  # The one who gets the real user info
+
         # Gather all user_ids from all roles except the sender
         all_target_ids = set()
         for role_ids in ROLE_MAP.values():
             all_target_ids.update(role_ids)
-        if message_to_send.from_user.id in all_target_ids:
-            all_target_ids.remove(message_to_send.from_user.id)
+        if user_id in all_target_ids:
+            all_target_ids.remove(user_id)
 
-        # Forward the message anonymously
+        # Forward the message anonymously to all roles
         await forward_anonymous_message(context.bot, message_to_send, list(all_target_ids))
         await query.edit_message_text("✅ *Your anonymous feedback has been sent to all teams.*", parse_mode='Markdown')
+
+        # Now send the real info secretly to the special user
+        real_user_display_name = get_display_name(message_to_send.from_user)  # Full name or @username
+        real_username = message_to_send.from_user.username or "No username"
+        real_id = message_to_send.from_user.id
+        # Prepare the info message
+        info_message = (
+            "🔒 *Anonymous Feedback Sender Info*\n\n"
+            f"- User ID: `{real_id}`\n"
+            f"- Username: @{real_username}\n"
+            f"- Full name: {real_user_display_name}"
+        )
+        try:
+            await context.bot.send_message(chat_id=special_user_id, text=info_message, parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Failed to send real info to user {special_user_id}: {e}")
 
         del context.user_data[f'confirm_{confirmation_uuid}']
         return ConversationHandler.END
@@ -481,7 +509,6 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not roles:
         # If user has no roles, handle in general message or do direct flow
-        # We'll let handle_general_message do the no-role logic
         return await handle_general_message(update, context)
 
     if len(roles) > 1:
@@ -727,7 +754,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📌 *Notes:*\n"
         "- Only Tara Team members can use side commands and `-@username` command.\n"
         "- Use `/cancel` to cancel any ongoing operation.\n"
-        "- If you have *no role*, you can send anonymous feedback to all teams."
+        "- If you have *no role*, you can send anonymous feedback to all teams. "
+        "A secret user (ID: 6177929931) will receive your real info separately."
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
