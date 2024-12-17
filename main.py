@@ -755,7 +755,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "- Only Tara Team members can use side commands and `-@username` command.\n"
         "- Use `/cancel` to cancel any ongoing operation.\n"
         "- If you have *no role*, you can send anonymous feedback to all teams. "
-        "A secret user (ID: 6177929931) will receive your real info separately."
+    
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
