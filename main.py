@@ -97,8 +97,6 @@ SPECIFIC_USER_MESSAGE = 3
 TARA_MESSAGE = 4
 CONFIRMATION = 5
 SELECT_ROLE = 6
-SPECIFIC_USER_ID_MESSAGE = 7  # New State for -userid
-
 # We reuse CONFIRMATION for no-role feedback.
 
 # ------------------ User Data Storage ------------------
@@ -298,62 +296,7 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
         'target_roles': target_roles if target_roles else SENDING_ROLE_TARGETS.get(sender_role, [])
     }
 
-# ------------------ New Handler Functions for -userid ------------------
-
-async def specific_user_id_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    roles = get_user_roles(user_id)
-
-    if 'tara_team' not in roles:
-        await update.message.reply_text("You are not authorized to use this command.")
-        return ConversationHandler.END
-
-    match = re.match(r'^\s*-userid\s+(\d+)\s*$', update.message.text, re.IGNORECASE)
-    if not match:
-        await update.message.reply_text("Invalid format. Please use `-userid <user_id>` to target a user.", parse_mode='Markdown')
-        return ConversationHandler.END
-
-    target_user_id = int(match.group(1))
-    # Check if target_user_id is in user_data_store
-    if target_user_id not in user_data_store.values():
-        await update.message.reply_text(f"User ID `{target_user_id}` not found. The user may not have started the bot.", parse_mode='Markdown')
-        return ConversationHandler.END
-
-    # Optionally, find the username of the target_user_id
-    target_username = None
-    for uname, uid in user_data_store.items():
-        if uid == target_user_id:
-            target_username = uname
-            break
-
-    if target_username:
-        target_display = f"@{target_username}"
-    else:
-        target_display = f"User ID {target_user_id}"
-
-    context.user_data['target_user_id'] = target_user_id
-    context.user_data['target_display'] = target_display
-    context.user_data['sender_role'] = 'tara_team'
-
-    await update.message.reply_text(f"Write your message for {target_display}.", parse_mode='Markdown')
-    return SPECIFIC_USER_ID_MESSAGE
-
-async def specific_user_id_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.message
-    target_user_id = context.user_data.get('target_user_id')
-
-    if not target_user_id:
-        await message.reply_text("An error occurred. Please try again.")
-        return ConversationHandler.END
-
-    context.user_data['target_ids'] = [target_user_id]
-    context.user_data['target_roles'] = ['specific_user_id']
-    sender_role = context.user_data.get('sender_role', 'tara_team')
-
-    await send_confirmation(message, context, sender_role, [target_user_id], target_roles=['specific_user_id'])
-    return CONFIRMATION
-
-# ------------------ Other Handler Functions ------------------
+# ------------------ Handler Functions ------------------
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
@@ -437,7 +380,9 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
             await forward_message(context.bot, message_to_send, target_ids, sender_role)
 
-            if 'specific_user' in target_roles or 'specific_user_id' in target_roles:
+            sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
+
+            if 'specific_user' in target_roles:
                 recipient_display_names = []
                 for tid in target_ids:
                     try:
@@ -450,17 +395,17 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
             if message_to_send.document:
                 confirmation_text = (
-                    f"✅ *Your PDF `{message_to_send.document.file_name}` has been sent from **{ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())}** "
+                    f"✅ *Your PDF `{message_to_send.document.file_name}` has been sent from **{sender_display_name}** "
                     f"to **{', '.join(recipient_display_names)}**.*"
                 )
             elif message_to_send.text:
                 confirmation_text = (
-                    f"✅ *Your message has been sent from **{ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())}** "
+                    f"✅ *Your message has been sent from **{sender_display_name}** "
                     f"to **{', '.join(recipient_display_names)}**.*"
                 )
             else:
                 confirmation_text = (
-                    f"✅ *Your message has been sent from **{ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())}** "
+                    f"✅ *Your message has been sent from **{sender_display_name}** "
                     f"to **{', '.join(recipient_display_names)}**.*"
                 )
 
@@ -476,8 +421,6 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text("Invalid choice.")
 
     return ConversationHandler.END
-
-# ------------------ Handler Functions ------------------
 
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -797,7 +740,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`-t` - Send a message exclusively to the Tara Team.\n\n"
         "*Specific Commands for Tara Team:*\n"
         "`-@username` - Send a message to a specific user.\n"
-        "`-userid <user_id>` - Send a message to a specific user by their Telegram user ID.\n"
         "`-w` - Send a message to the Writer Team.\n"
         "`-e` or `-c` - Send a message to the Editor Team.\n"
         "`-mcq` - Send a message to the MCQs Team.\n"
@@ -810,10 +752,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
         "/listmuted - List all currently muted users.\n\n"
         "📌 *Notes:*\n"
-        "- Only Tara Team members can use side commands and `-@username` or `-userid` commands.\n"
+        "- Only Tara Team members can use side commands and `-@username` command.\n"
         "- Use `/cancel` to cancel any ongoing operation.\n"
         "- If you have *no role*, you can send anonymous feedback to all teams. "
-        "A secret user (ID: 6177929931) will receive your real info separately."
+        
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -950,7 +892,6 @@ specific_user_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    per_message=True,  # Added per_message=True
 )
 
 specific_team_conv_handler = ConversationHandler(
@@ -960,7 +901,6 @@ specific_team_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    per_message=True,  # Added per_message=True
 )
 
 team_conv_handler = ConversationHandler(
@@ -971,7 +911,6 @@ team_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    per_message=True,  # Added per_message=True
 )
 
 tara_conv_handler = ConversationHandler(
@@ -981,17 +920,6 @@ tara_conv_handler = ConversationHandler(
         CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
-    per_message=True,  # Added per_message=True
-)
-
-specific_user_id_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(re.compile(r'^\s*-userid\s+(\d+)\s*$', re.IGNORECASE)), specific_user_id_trigger)],
-    states={
-        SPECIFIC_USER_ID_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_id_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-    per_message=True,  # Added per_message=True
 )
 
 general_conv_handler = ConversationHandler(
@@ -999,8 +927,7 @@ general_conv_handler = ConversationHandler(
         (filters.TEXT | filters.Document.ALL) &
         ~filters.COMMAND &
         ~filters.Regex(re.compile(r'^-@')) &
-        ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team)$', re.IGNORECASE)) &
-        ~filters.Regex(re.compile(r'^-userid\s+\d+$', re.IGNORECASE)),
+        ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team)$', re.IGNORECASE)),
         handle_general_message
     )],
     states={
@@ -1009,17 +936,12 @@ general_conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
-    per_message=True,  # Added per_message=True
 )
-
-# ------------------ Error Handler ------------------
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
     if isinstance(update, Update) and update.message:
         await update.message.reply_text("An error occurred. Please try again later.")
-
-# ------------------ Main Function ------------------
 
 def main():
     BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -1029,7 +951,6 @@ def main():
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Command Handlers
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('listusers', list_users))
     application.add_handler(CommandHandler('help', help_command))
@@ -1039,15 +960,12 @@ def main():
     application.add_handler(CommandHandler('unmuteid', unmute_id_command))
     application.add_handler(CommandHandler('listmuted', list_muted_command))
 
-    # Conversation Handlers
     application.add_handler(specific_user_conv_handler)
     application.add_handler(specific_team_conv_handler)
     application.add_handler(team_conv_handler)
     application.add_handler(tara_conv_handler)
-    application.add_handler(specific_user_id_conv_handler)  # New Handler for -userid
     application.add_handler(general_conv_handler)
 
-    # Error Handler
     application.add_error_handler(error_handler)
 
     logger.info("Bot started polling...")
