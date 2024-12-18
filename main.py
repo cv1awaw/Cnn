@@ -340,22 +340,15 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text("✅ *Your anonymous feedback has been sent to all teams.*", parse_mode='Markdown')
 
         # Now send the real info secretly to the special user
+        real_user_display_name = get_display_name(message_to_send.from_user)  # Full name or @username
         real_username = message_to_send.from_user.username or "No username"
         real_id = message_to_send.from_user.id
-        # Retrieve full name separately
-        if message_to_send.from_user.last_name:
-            full_name = f"{message_to_send.from_user.first_name} {message_to_send.from_user.last_name}"
-        else:
-            full_name = message_to_send.from_user.first_name
-
-        logger.info(f"Anonymous feedback sender info - ID: {real_id}, Username: @{real_username}, Full name: {full_name}")
-
         # Prepare the info message
         info_message = (
             "🔒 *Anonymous Feedback Sender Info*\n\n"
             f"- User ID: `{real_id}`\n"
             f"- Username: @{real_username}\n"
-            f"- Full name: {full_name}"
+            f"- Full name: {real_user_display_name}"
         )
         try:
             await context.bot.send_message(chat_id=special_user_id, text=info_message, parse_mode='Markdown')
@@ -761,7 +754,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📌 *Notes:*\n"
         "- Only Tara Team members can use side commands and `-@username` command.\n"
         "- Use `/cancel` to cancel any ongoing operation.\n"
-        "- If you have *no role*, you can send anonymous feedback to all teams."
+        "- If you have *no role*, you can send anonymous feedback to all teams. "
+        
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
