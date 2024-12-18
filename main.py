@@ -348,6 +348,8 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         else:
             full_name = message_to_send.from_user.first_name
 
+        logger.info(f"Anonymous feedback sender info - ID: {real_id}, Username: @{real_username}, Full name: {full_name}")
+
         # Prepare the info message
         info_message = (
             "🔒 *Anonymous Feedback Sender Info*\n\n"
