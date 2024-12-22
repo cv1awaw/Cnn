@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-
-"""
-this code works well don't change anything
-"""
-
 import logging
 import os
 import re
@@ -103,6 +97,8 @@ SPECIFIC_USER_MESSAGE = 3
 TARA_MESSAGE = 4
 CONFIRMATION = 5
 SELECT_ROLE = 6
+USERID_MESSAGE = 7  # <--- NEW state for -user_id flows
+
 # We reuse CONFIRMATION for no-role feedback.
 
 # ------------------ User Data Storage ------------------
@@ -705,6 +701,75 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         await send_confirmation(message, context, selected_role, list(target_ids), target_roles=target_roles)
         return CONFIRMATION
 
+# ------------------ NEW: -user_id Implementation ------------------
+
+async def user_id_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Entry point for -user_id <some_user_id>.
+    Only user 6177929931 can use this command.
+    """
+    # 1) Check if the caller is user 6177929931
+    if update.message.from_user.id != 6177929931:
+        await update.message.reply_text("You are not authorized to use this command.")
+        return ConversationHandler.END
+
+    # 2) Extract the target user ID from the message
+    # The text format is: "-user_id <some_user_id>"
+    message_text = update.message.text.strip()
+    match = re.match(r'^-user_id\s+(\d+)$', message_text, re.IGNORECASE)
+    if not match:
+        await update.message.reply_text("Usage: `-user_id <user_id>`", parse_mode='Markdown')
+        return ConversationHandler.END
+
+    target_id_str = match.group(1)
+    target_id = int(target_id_str)
+
+    # 3) Save target_id in context.user_data so we can use it next
+    context.user_data['target_id'] = target_id
+
+    # 4) Ask user for the message to send
+    await update.message.reply_text(f"Please write the message you want to send to user ID {target_id}.")
+    return USERID_MESSAGE
+
+async def user_id_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Receives a message, tries to send it to the user_id stored in context.user_data.
+    If successful, say "sent" else say "didn't send".
+    """
+    message = update.message
+    target_id = context.user_data.get('target_id')
+    if not target_id:
+        await message.reply_text("No target user ID found. Please try again.")
+        return ConversationHandler.END
+
+    # Attempt to forward the message
+    try:
+        if message.document:
+            await context.bot.send_document(
+                chat_id=target_id,
+                document=message.document.file_id,
+                caption=message.caption or "",
+            )
+        elif message.text:
+            await context.bot.send_message(
+                chat_id=target_id,
+                text=message.text
+            )
+        else:
+            # If it's neither text nor document, forward it directly
+            await context.bot.forward_message(
+                chat_id=target_id,
+                from_chat_id=message.chat.id,
+                message_id=message.message_id
+            )
+
+        await message.reply_text("sent")
+    except Exception as e:
+        logger.error(f"Failed to send message to user {target_id}: {e}")
+        await message.reply_text("didn't sent")
+
+    return ConversationHandler.END
+
 # ------------------ Command Handlers ------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -779,7 +844,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/muteid <user_id> - Mute a specific user by their ID.\n"
         "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
         "/listmuted - List all currently muted users.\n"
-        "`-check <user_id>` or `/check <user_id>` - Check if that user has interacted and what roles they have (6177929931 only).\n\n"
+        "`-check <user_id>` or `/check <user_id>` - Check if that user has interacted and what roles they have (6177929931 only).\n"
+        "`-user_id <user_id>` - *Only user 6177929931* can use this to send a message to a given user ID.\n\n"
         "📌 *Notes:*\n"
         "- Only Tara Team members can use side commands and `-@username` command.\n"
         "- Use `/cancel` to cancel any ongoing operation.\n"
@@ -975,6 +1041,23 @@ async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode='Markdown'
     )
 
+# ------------------ NEW: Conversation Handler for -user_id  ------------------
+
+user_id_conv_handler = ConversationHandler(
+    entry_points=[
+        MessageHandler(
+            filters.Regex(re.compile(r'^-user_id\s+(\d+)$', re.IGNORECASE)),
+            user_id_trigger
+        )
+    ],
+    states={
+        USERID_MESSAGE: [
+            MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, user_id_message_handler)
+        ],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
+
 # ------------------ Conversation Handlers ------------------
 
 specific_user_conv_handler = ConversationHandler(
@@ -1045,7 +1128,7 @@ general_conv_handler = ConversationHandler(
             (filters.TEXT | filters.Document.ALL)
             & ~filters.COMMAND
             & ~filters.Regex(re.compile(r'^-@'))
-            & ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team)$', re.IGNORECASE)),
+            & ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team|user_id)$', re.IGNORECASE)),
             handle_general_message
         )
     ],
@@ -1096,6 +1179,9 @@ def main():
             check_user_command
         )
     )
+
+    # NEW: Add user_id_conv_handler
+    application.add_handler(user_id_conv_handler)
 
     # Conversation handlers
     application.add_handler(specific_user_conv_handler)
