@@ -305,7 +305,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await update.callback_query.edit_message_text("Operation cancelled.")
         except:
-            # Possibly the message was already edited or no longer exists
             pass
     else:
         await update.message.reply_text("Operation cancelled.")
@@ -317,7 +316,6 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     - no-role anonymous feedback
     - normal message confirmations
     - user_id approach (confirm_userid)
-    - "I have read the message" approach (seen_userid)
     """
     query = update.callback_query
     await query.answer()
@@ -533,62 +531,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             pass
         return ConversationHandler.END
 
-    # 4) "I have read the message" logic
-    if data.startswith("seen_userid:"):
-        try:
-            _, seen_uuid = data.split(':', 1)
-        except ValueError:
-            try:
-                await query.edit_message_text("Invalid 'seen' data. Please try again.")
-            except:
-                pass
-            return ConversationHandler.END
-
-        seen_data = context.user_data.get(f'seen_userid_{seen_uuid}')
-        if not seen_data:
-            # This might happen if data was already removed or clicked again
-            try:
-                await query.edit_message_text("No related message found to mark as read or already seen.")
-            except:
-                pass
-            return ConversationHandler.END
-
-        intended_target_id = seen_data['target_id']
-        user_who_read = update.effective_user
-
-        # If you only want the intended recipient to confirm "read"
-        if user_who_read.id != intended_target_id:
-            try:
-                await query.edit_message_text("You are not the intended recipient of this message.")
-            except:
-                pass
-            return ConversationHandler.END
-
-        # Notify 6177929931
-        try:
-            await context.bot.send_message(
-                chat_id=6177929931,
-                text=(
-                    f"**Seen Notification**\n\n"
-                    f"The user `{user_who_read.id}` ({get_display_name(user_who_read)}) "
-                    "has clicked 'I have read the message'."
-                ),
-                parse_mode='Markdown'
-            )
-        except Exception as e:
-            logger.error(f"Failed to notify 6177929931 about seen message: {e}")
-
-        # Let the user know we got it
-        try:
-            await query.edit_message_text("✅ *We have recorded that you read this message.*", parse_mode='Markdown')
-        except:
-            pass
-
-        # Remove the entry
-        del context.user_data[f'seen_userid_{seen_uuid}']
-        return ConversationHandler.END
-
-    # 5) Otherwise
+    # If none match above patterns:
     try:
         await query.edit_message_text("Invalid choice.")
     except:
@@ -942,6 +885,62 @@ async def user_id_message_collector(update: Update, context: ContextTypes.DEFAUL
     del context.user_data['target_user_id_userid']
     return CONFIRMATION
 
+# ------------------ A separate handler for the "seen_userid:" callback  ------------------
+
+async def seen_userid_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    This handler is global and always active, so even if the conversation ended,
+    the target user can still click "I have read the message" and notify 6177929931.
+    """
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data  # e.g. "seen_userid:<uuid>"
+    _, seen_uuid = data.split(':', 1)
+
+    seen_data = context.user_data.get(f'seen_userid_{seen_uuid}')
+    if not seen_data:
+        # Possibly the data was already removed or user clicked again
+        try:
+            await query.edit_message_text("No related message found to mark as read or already seen.")
+        except:
+            pass
+        return
+
+    intended_target_id = seen_data['target_id']
+    user_who_read = update.effective_user
+
+    # Ensure only the intended recipient can confirm "read"
+    if user_who_read.id != intended_target_id:
+        try:
+            await query.edit_message_text("You are not the intended recipient of this message.")
+        except:
+            pass
+        return
+
+    # Notify 6177929931 that the user read the message
+    try:
+        await context.bot.send_message(
+            chat_id=6177929931,
+            text=(
+                f"**Seen Notification**\n\n"
+                f"The user `{user_who_read.id}` ({get_display_name(user_who_read)}) "
+                "has clicked 'I have read the message'."
+            ),
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify 6177929931: {e}")
+
+    # Update the inline message for the user
+    try:
+        await query.edit_message_text("✅ *We have recorded that you read this message.*", parse_mode='Markdown')
+    except:
+        pass
+
+    # Remove the entry from user data
+    del context.user_data[f'seen_userid_{seen_uuid}']
+
 # ------------------ Command Handlers ------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1207,7 +1206,7 @@ user_id_conv_handler = ConversationHandler(
         CONFIRMATION: [
             CallbackQueryHandler(
                 confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:|seen_userid:).*'
+                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
             )
         ],
     },
@@ -1228,7 +1227,7 @@ specific_user_conv_handler = ConversationHandler(
         CONFIRMATION: [
             CallbackQueryHandler(
                 confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:|seen_userid:).*'
+                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
             )
         ],
     },
@@ -1246,7 +1245,7 @@ specific_team_conv_handler = ConversationHandler(
         CONFIRMATION: [
             CallbackQueryHandler(
                 confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:|seen_userid:).*'
+                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
             )
         ],
     },
@@ -1265,7 +1264,7 @@ team_conv_handler = ConversationHandler(
         CONFIRMATION: [
             CallbackQueryHandler(
                 confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:|seen_userid:).*'
+                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
             )
         ],
     },
@@ -1281,7 +1280,7 @@ tara_conv_handler = ConversationHandler(
         CONFIRMATION: [
             CallbackQueryHandler(
                 confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:|seen_userid:).*'
+                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
             )
         ],
     },
@@ -1305,7 +1304,7 @@ general_conv_handler = ConversationHandler(
         CONFIRMATION: [
             CallbackQueryHandler(
                 confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:|seen_userid:).*'
+                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
             )
         ],
     },
@@ -1357,6 +1356,14 @@ def main():
     application.add_handler(team_conv_handler)
     application.add_handler(tara_conv_handler)
     application.add_handler(general_conv_handler)
+
+    # Global "seen_userid" handler, so it is always active.
+    application.add_handler(
+        CallbackQueryHandler(
+            seen_userid_handler,
+            pattern=r'^seen_userid:.*'
+        )
+    )
 
     application.add_error_handler(error_handler)
 
