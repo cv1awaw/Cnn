@@ -97,9 +97,8 @@ SPECIFIC_USER_MESSAGE = 3
 TARA_MESSAGE = 4
 CONFIRMATION = 5
 SELECT_ROLE = 6
-USERID_MESSAGE = 7  # <--- NEW state for -user_id flows
-
-# We reuse CONFIRMATION for no-role feedback.
+# We no longer need USERID_MESSAGE because we'll confirm immediately
+# USERID_MESSAGE = 7
 
 # ------------------ User Data Storage ------------------
 
@@ -319,7 +318,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     data = query.data
 
-    # Special check for anonymous feedback (no roles)
+    # 1) Special check for anonymous feedback (no roles)
     if data.startswith('confirm_no_role:'):
         try:
             _, confirmation_uuid = data.split(':', 1)
@@ -366,7 +365,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         del context.user_data[f'confirm_{confirmation_uuid}']
         return ConversationHandler.END
 
-    # Normal confirm/cancel logic
+    # 2) Normal confirm/cancel logic (existing)
     if data.startswith('confirm:') or data.startswith('cancel:'):
         try:
             action, confirmation_uuid = data.split(':', 1)
@@ -377,60 +376,119 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         confirm_data = context.user_data.get(f'confirm_{confirmation_uuid}')
 
         if not confirm_data:
+            # 2B) Additional check for -user_id confirmations
+            # e.g. data might start with confirm_userid: or cancel_userid:
+            pass
+        else:
+            if action == 'confirm':
+                message_to_send = confirm_data['message']
+                target_ids = confirm_data['target_ids']
+                sender_role = confirm_data['sender_role']
+                target_roles = confirm_data.get('target_roles', [])
+
+                await forward_message(context.bot, message_to_send, target_ids, sender_role)
+                sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
+
+                if 'specific_user' in target_roles:
+                    recipient_display_names = []
+                    for tid in target_ids:
+                        try:
+                            target_user = await context.bot.get_chat(tid)
+                            recipient_display_names.append(get_display_name(target_user))
+                        except:
+                            recipient_display_names.append(str(tid))
+                else:
+                    recipient_display_names = [
+                        ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles if r != 'specific_user'
+                    ]
+
+                if message_to_send.document:
+                    confirmation_text = (
+                        f"✅ *Your PDF `{message_to_send.document.file_name}` has been sent "
+                        f"from **{sender_display_name}** to **{', '.join(recipient_display_names)}**.*"
+                    )
+                elif message_to_send.text:
+                    confirmation_text = (
+                        f"✅ *Your message has been sent from **{sender_display_name}** "
+                        f"to **{', '.join(recipient_display_names)}**.*"
+                    )
+                else:
+                    confirmation_text = (
+                        f"✅ *Your message has been sent from **{sender_display_name}** "
+                        f"to **{', '.join(recipient_display_names)}**.*"
+                    )
+
+                await query.edit_message_text(confirmation_text, parse_mode='Markdown')
+                del context.user_data[f'confirm_{confirmation_uuid}']
+
+            elif action == 'cancel':
+                await query.edit_message_text("Operation cancelled.")
+                if f'confirm_{confirmation_uuid}' in context.user_data:
+                    del context.user_data[f'confirm_{confirmation_uuid}']
+            
+            return ConversationHandler.END
+
+    # 3) Check if we have new callback data for user_id
+    if data.startswith("confirm_userid:"):
+        # e.g. confirm_userid:1234-5678-...
+        try:
+            _, confirmation_uuid = data.split(':', 1)
+        except ValueError:
+            await query.edit_message_text("Invalid confirmation data. Please try again.")
+            return ConversationHandler.END
+
+        confirm_data = context.user_data.get(f'confirm_userid_{confirmation_uuid}')
+        if not confirm_data:
             await query.edit_message_text("An error occurred. Please try again.")
             return ConversationHandler.END
 
-        if action == 'confirm':
-            message_to_send = confirm_data['message']
-            target_ids = confirm_data['target_ids']
-            sender_role = confirm_data['sender_role']
-            target_roles = confirm_data.get('target_roles', [])
+        # Do the actual sending
+        msg_text = confirm_data['msg_text']
+        msg_doc = confirm_data['msg_doc']
+        target_id = confirm_data['target_id']
+        reply_message = confirm_data['original_message']
 
-            await forward_message(context.bot, message_to_send, target_ids, sender_role)
-
-            sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
-
-            if 'specific_user' in target_roles:
-                recipient_display_names = []
-                for tid in target_ids:
-                    try:
-                        target_user = await context.bot.get_chat(tid)
-                        recipient_display_names.append(get_display_name(target_user))
-                    except:
-                        recipient_display_names.append(str(tid))
-            else:
-                recipient_display_names = [
-                    ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles if r != 'specific_user'
-                ]
-
-            if message_to_send.document:
-                confirmation_text = (
-                    f"✅ *Your PDF `{message_to_send.document.file_name}` has been sent from **{sender_display_name}** "
-                    f"to **{', '.join(recipient_display_names)}**.*"
-                )
-            elif message_to_send.text:
-                confirmation_text = (
-                    f"✅ *Your message has been sent from **{sender_display_name}** "
-                    f"to **{', '.join(recipient_display_names)}**.*"
+        try:
+            if msg_doc:
+                # It's a document
+                await context.bot.send_document(
+                    chat_id=target_id,
+                    document=msg_doc.file_id,
+                    caption=msg_doc.caption or ""
                 )
             else:
-                confirmation_text = (
-                    f"✅ *Your message has been sent from **{sender_display_name}** "
-                    f"to **{', '.join(recipient_display_names)}**.*"
+                # It's text only
+                await context.bot.send_message(
+                    chat_id=target_id,
+                    text=msg_text
                 )
+            await query.edit_message_text("✅ *Your message has been sent.*", parse_mode='Markdown')
+            await reply_message.reply_text("sent")
+        except Exception as e:
+            logger.error(f"Failed to send message to user {target_id}: {e}")
+            await query.edit_message_text("❌ Failed to send message.", parse_mode='Markdown')
+            await reply_message.reply_text("didn't sent")
 
-            await query.edit_message_text(confirmation_text, parse_mode='Markdown')
-            del context.user_data[f'confirm_{confirmation_uuid}']
+        del context.user_data[f'confirm_userid_{confirmation_uuid}']
+        return ConversationHandler.END
 
-        elif action == 'cancel':
-            await query.edit_message_text("Operation cancelled.")
-            if f'confirm_{confirmation_uuid}' in context.user_data:
-                del context.user_data[f'confirm_{confirmation_uuid}']
+    elif data.startswith("cancel_userid:"):
+        try:
+            _, confirmation_uuid = data.split(':', 1)
+        except ValueError:
+            await query.edit_message_text("Invalid confirmation data. Please try again.")
+            return ConversationHandler.END
+
+        # Just remove from user_data
+        if f'confirm_userid_{confirmation_uuid}' in context.user_data:
+            del context.user_data[f'confirm_userid_{confirmation_uuid}']
+        await query.edit_message_text("Operation cancelled.")
+        return ConversationHandler.END
 
     else:
+        # No recognized pattern
         await query.edit_message_text("Invalid choice.")
-
-    return ConversationHandler.END
+        return ConversationHandler.END
 
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -701,74 +759,84 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         await send_confirmation(message, context, selected_role, list(target_ids), target_roles=target_roles)
         return CONFIRMATION
 
-# ------------------ NEW: -user_id Implementation ------------------
+# ------------------ NEW: -user_id Implementation with confirmation ------------------
 
 async def user_id_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Entry point for -user_id <some_user_id>.
     Only user 6177929931 can use this command.
+    After the user types -user_id <id>, we ask for the message,
+    and then show a confirmation inline keyboard.
     """
     # 1) Check if the caller is user 6177929931
     if update.message.from_user.id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return ConversationHandler.END
 
-    # 2) Extract the target user ID from the message
-    # The text format is: "-user_id <some_user_id>"
+    # 2) Extract the target user ID
     message_text = update.message.text.strip()
     match = re.match(r'^-user_id\s+(\d+)$', message_text, re.IGNORECASE)
     if not match:
         await update.message.reply_text("Usage: `-user_id <user_id>`", parse_mode='Markdown')
         return ConversationHandler.END
 
-    target_id_str = match.group(1)
-    target_id = int(target_id_str)
+    target_id = int(match.group(1))
 
-    # 3) Save target_id in context.user_data so we can use it next
-    context.user_data['target_id'] = target_id
+    # 3) Prompt for message
+    await update.message.reply_text(
+        f"Please write the message (text or PDF) you want to send to user ID {target_id}."
+        "\nThen I'll ask for confirmation."
+    )
+    # Store the target_id in user_data for next step
+    context.user_data['target_user_id_userid'] = target_id
+    return SPECIFIC_USER_MESSAGE  # We'll reuse SPECIFIC_USER_MESSAGE to intercept any message.
 
-    # 4) Ask user for the message to send
-    await update.message.reply_text(f"Please write the message you want to send to user ID {target_id}.")
-    return USERID_MESSAGE
-
-async def user_id_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def user_id_message_collector(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Receives a message, tries to send it to the user_id stored in context.user_data.
-    If successful, say "sent" else say "didn't send".
+    This is triggered after the user typed -user_id <id> and we asked them for the message.
+    We'll build a confirm_userid callback, store the data, and present Confirm/Cancel.
     """
     message = update.message
-    target_id = context.user_data.get('target_id')
+    target_id = context.user_data.get('target_user_id_userid')
     if not target_id:
-        await message.reply_text("No target user ID found. Please try again.")
+        await message.reply_text("An error occurred. Please try again.")
         return ConversationHandler.END
 
-    # Attempt to forward the message
-    try:
-        if message.document:
-            await context.bot.send_document(
-                chat_id=target_id,
-                document=message.document.file_id,
-                caption=message.caption or "",
-            )
-        elif message.text:
-            await context.bot.send_message(
-                chat_id=target_id,
-                text=message.text
-            )
-        else:
-            # If it's neither text nor document, forward it directly
-            await context.bot.forward_message(
-                chat_id=target_id,
-                from_chat_id=message.chat.id,
-                message_id=message.message_id
-            )
+    # Build a preview text for what they'll send
+    if message.document:
+        content_description = f"PDF: `{message.document.file_name}`"
+    elif message.text:
+        content_description = f"Message: `{message.text}`"
+    else:
+        content_description = "Unsupported message type."
 
-        await message.reply_text("sent")
-    except Exception as e:
-        logger.error(f"Failed to send message to user {target_id}: {e}")
-        await message.reply_text("didn't sent")
+    confirmation_text = (
+        f"📩 *You are about to send the following to user ID **{target_id}**:*\n\n"
+        f"{content_description}\n\n"
+        "Do you want to send this?"
+    )
 
-    return ConversationHandler.END
+    confirmation_uuid = str(uuid.uuid4())
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Confirm", callback_data=f'confirm_userid:{confirmation_uuid}'),
+            InlineKeyboardButton("❌ Cancel", callback_data=f'cancel_userid:{confirmation_uuid}'),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
+
+    # We'll store everything we need in user_data
+    context.user_data[f'confirm_userid_{confirmation_uuid}'] = {
+        'target_id': target_id,
+        'original_message': message,  # We'll use this to reply "sent" or "didn't sent"
+        'msg_text': message.text if message.text else "",
+        'msg_doc': message.document if message.document else None,
+    }
+
+    # We can now remove 'target_user_id_userid' since we won't need it again
+    del context.user_data['target_user_id_userid']
+    return CONFIRMATION
 
 # ------------------ Command Handlers ------------------
 
@@ -845,9 +913,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
         "/listmuted - List all currently muted users.\n"
         "`-check <user_id>` or `/check <user_id>` - Check if that user has interacted and what roles they have (6177929931 only).\n"
-        "`-user_id <user_id>` - *Only user 6177929931* can use this to send a message to a given user ID.\n\n"
+        "`-user_id <user_id>` - Only user 6177929931 can use this to send a message to that user (with confirmation).\n\n"
         "📌 *Notes:*\n"
-        "- Only Tara Team members can use side commands and `-@username` command.\n"
+        "- Only Tara Team members can use side commands like `-@username`, `-w`, `-e`, etc.\n"
         "- Use `/cancel` to cancel any ongoing operation.\n"
         "- If you have *no role*, you can send anonymous feedback to all teams."
     )
@@ -1041,7 +1109,7 @@ async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode='Markdown'
     )
 
-# ------------------ NEW: Conversation Handler for -user_id  ------------------
+# ------------------ Conversation Handlers ------------------
 
 user_id_conv_handler = ConversationHandler(
     entry_points=[
@@ -1051,14 +1119,16 @@ user_id_conv_handler = ConversationHandler(
         )
     ],
     states={
-        USERID_MESSAGE: [
-            MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, user_id_message_handler)
+        # We'll reuse SPECIFIC_USER_MESSAGE to collect the next message the user sends
+        SPECIFIC_USER_MESSAGE: [
+            MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, user_id_message_collector)
+        ],
+        CONFIRMATION: [
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
-
-# ------------------ Conversation Handlers ------------------
 
 specific_user_conv_handler = ConversationHandler(
     entry_points=[
@@ -1072,7 +1142,7 @@ specific_user_conv_handler = ConversationHandler(
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1087,7 +1157,7 @@ specific_team_conv_handler = ConversationHandler(
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1103,7 +1173,7 @@ team_conv_handler = ConversationHandler(
             CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1116,7 +1186,7 @@ tara_conv_handler = ConversationHandler(
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1137,7 +1207,7 @@ general_conv_handler = ConversationHandler(
             CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1180,10 +1250,8 @@ def main():
         )
     )
 
-    # NEW: Add user_id_conv_handler
-    application.add_handler(user_id_conv_handler)
-
     # Conversation handlers
+    application.add_handler(user_id_conv_handler)       # NEW for -user_id <id>
     application.add_handler(specific_user_conv_handler)
     application.add_handler(specific_team_conv_handler)
     application.add_handler(team_conv_handler)
