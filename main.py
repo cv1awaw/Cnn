@@ -218,7 +218,7 @@ async def forward_message(bot, message, target_ids, sender_role):
                 )
                 logger.info(f"Forwarded text message to {user_id}")
             else:
-                # If it's neither a text nor a document, forward the message
+                # If it's neither text nor document, forward the message
                 await bot.forward_message(
                     chat_id=user_id,
                     from_chat_id=message.chat.id,
@@ -274,8 +274,10 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
     if target_roles:
         target_roles_display = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
     else:
-        target_roles_display = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) 
-                                for r in SENDING_ROLE_TARGETS.get(sender_role, [])]
+        target_roles_display = [
+            ROLE_DISPLAY_NAMES.get(r, r.capitalize()) 
+            for r in SENDING_ROLE_TARGETS.get(sender_role, [])
+        ]
 
     confirmation_text = (
         f"📩 *You are about to send the following to **{', '.join(target_roles_display)}**:*\n\n"
@@ -771,7 +773,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/muteid <user_id> - Mute a specific user by their ID.\n"
         "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
         "/listmuted - List all currently muted users.\n"
-        "`-check <user_id>` - Check if that user has interacted and what roles they have (6177929931 only).\n\n"
+        "`-check <user_id>` or `/check <user_id>` - Check if that user has interacted and what roles they have (6177929931 only).\n\n"
         "📌 *Notes:*\n"
         "- Only Tara Team members can use side commands and `-@username` command.\n"
         "- Use `/cancel` to cancel any ongoing operation.\n"
@@ -907,32 +909,44 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     muted_users_text = "\n".join(muted_list)
     await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
 
-# ------------------ NEW: /check or -check <user_id> trigger ------------------
+# ------------------ FIXED: /check or -check <user_id> ------------------
 
 async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    A command that can only be used by user_id == 6177929931.
-    It checks if a user ID has interacted with the bot and if so,
-    shows their roles.
+    This command can be triggered either by:
+    1. /check <user_id>
+    2. -check <user_id> (via a MessageHandler + regex)
+
+    Because context.args is only set for slash commands,
+    we need to parse manually if the user typed "-check <user_id>".
     """
+    # Only user_id 6177929931 can use this
     user_id = update.message.from_user.id
     if user_id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
-    # Check that we have exactly 1 argument: user_id
-    if len(context.args) != 1:
-        await update.message.reply_text("Usage: -check <user_id>", parse_mode='Markdown')
-        return
+    # If context.args is None, it means the trigger likely came from "-check <user_id>"
+    if context.args is None or len(context.args) == 0:
+        # Parse from the raw text
+        message_text = update.message.text.strip()
+        match = re.match(r'^-check\s+(\d+)$', message_text, re.IGNORECASE)
+        if not match:
+            await update.message.reply_text("Usage: -check <user_id>", parse_mode='Markdown')
+            return
+        check_id = int(match.group(1))
+    else:
+        # The user typed /check <user_id>, so context.args should contain the ID
+        if len(context.args) != 1:
+            await update.message.reply_text("Usage: /check <user_id>", parse_mode='Markdown')
+            return
+        try:
+            check_id = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("Please provide a valid user ID.", parse_mode='Markdown')
+            return
 
-    try:
-        check_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("Please provide a valid user ID to check.", parse_mode='Markdown')
-        return
-
-    # Attempt to see if this user_id is in user_data_store
-    # user_data_store is username => user_id, so let's see if check_id is a value
+    # Now check if this user ID is in user_data_store
     username_found = None
     for uname, uid in user_data_store.items():
         if uid == check_id:
@@ -946,7 +960,7 @@ async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # If found, let's see what roles the user has
     roles = get_user_roles(check_id)
     if roles:
-        roles_display = ", ".join([ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in roles])
+        roles_display = ", ".join(ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in roles)
     else:
         roles_display = "No role (anonymous feedback user)."
 
@@ -1068,13 +1082,14 @@ def main():
     application.add_handler(CommandHandler('unmuteid', unmute_id_command))
     application.add_handler(CommandHandler('listmuted', list_muted_command))
 
-    # The new -check <user_id> command for user 6177929931 only
+    # Register the check command (slash + dash-based triggers)
     application.add_handler(CommandHandler('check', check_user_command))
-    # Alternatively, if you want it triggered by a dash, you can do:
-    application.add_handler(MessageHandler(
-        filters.Regex(re.compile(r'^-check\s+(\d+)$', re.IGNORECASE)),
-        check_user_command
-    ))
+    application.add_handler(
+        MessageHandler(
+            filters.Regex(re.compile(r'^-check\s+(\d+)$', re.IGNORECASE)),
+            check_user_command
+        )
+    )
 
     # Conversation handlers
     application.add_handler(specific_user_conv_handler)
