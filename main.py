@@ -57,7 +57,7 @@ ROLE_DISPLAY_NAMES = {
     'mind_map_form_creator': 'Mind Map & Form Creation Team',
 }
 
-# Define trigger to target roles mapping for Tara Team side commands
+# For Tara side triggers
 TRIGGER_TARGET_MAP = {
     '-w': ['writer'],
     '-e': ['checker_team'],
@@ -68,7 +68,6 @@ TRIGGER_TARGET_MAP = {
     '-c': ['checker_team'],
 }
 
-# Updated forwarding rules
 SENDING_ROLE_TARGETS = {
     'writer': ['mcqs_team', 'checker_team', 'tara_team'],
     'mcqs_team': ['design_team', 'tara_team'],
@@ -97,7 +96,6 @@ SPECIFIC_USER_MESSAGE = 3
 TARA_MESSAGE = 4
 CONFIRMATION = 5
 SELECT_ROLE = 6
-# USERID_MESSAGE = 7 (not used because we confirm immediately)
 
 # ------------------ User Data Storage ------------------
 
@@ -304,7 +302,11 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.edit_message_text("Operation cancelled.")
+        try:
+            await update.callback_query.edit_message_text("Operation cancelled.")
+        except:
+            # Possibly the message was already edited or no longer exists
+            pass
     else:
         await update.message.reply_text("Operation cancelled.")
     return ConversationHandler.END
@@ -326,12 +328,18 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             _, confirmation_uuid = data.split(':', 1)
         except ValueError:
-            await query.edit_message_text("Invalid confirmation data. Please try again.")
+            try:
+                await query.edit_message_text("Invalid confirmation data. Please try again.")
+            except:
+                pass
             return ConversationHandler.END
 
         confirm_data = context.user_data.get(f'confirm_{confirmation_uuid}')
         if not confirm_data:
-            await query.edit_message_text("An error occurred. Please try again.")
+            try:
+                await query.edit_message_text("An error occurred. Please try again.")
+            except:
+                pass
             return ConversationHandler.END
 
         message_to_send = confirm_data['message']
@@ -347,9 +355,12 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
         # Forward the message anonymously to all roles
         await forward_anonymous_message(context.bot, message_to_send, list(all_target_ids))
-        await query.edit_message_text("✅ *Your anonymous feedback has been sent to all teams.*", parse_mode='Markdown')
+        try:
+            await query.edit_message_text("✅ *Your anonymous feedback has been sent to all teams.*", parse_mode='Markdown')
+        except:
+            pass
 
-        # Send the real info secretly to 6177929931
+        # Send real info to 6177929931
         real_user_display_name = get_display_name(message_to_send.from_user)
         real_username = message_to_send.from_user.username or "No username"
         real_id = message_to_send.from_user.id
@@ -372,13 +383,15 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             action, confirmation_uuid = data.split(':', 1)
         except ValueError:
-            await query.edit_message_text("Invalid confirmation data. Please try again.")
+            try:
+                await query.edit_message_text("Invalid confirmation data. Please try again.")
+            except:
+                pass
             return ConversationHandler.END
 
         confirm_data = context.user_data.get(f'confirm_{confirmation_uuid}')
 
         if confirm_data:
-            # Either "confirm" or "cancel"
             if action == 'confirm':
                 message_to_send = confirm_data['message']
                 target_ids = confirm_data['target_ids']
@@ -417,11 +430,18 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                         f"to **{', '.join(recipient_display_names)}**.*"
                     )
 
-                await query.edit_message_text(confirmation_text, parse_mode='Markdown')
+                try:
+                    await query.edit_message_text(confirmation_text, parse_mode='Markdown')
+                except:
+                    pass
+
                 del context.user_data[f'confirm_{confirmation_uuid}']
 
             elif action == 'cancel':
-                await query.edit_message_text("Operation cancelled.")
+                try:
+                    await query.edit_message_text("Operation cancelled.")
+                except:
+                    pass
                 if f'confirm_{confirmation_uuid}' in context.user_data:
                     del context.user_data[f'confirm_{confirmation_uuid}']
 
@@ -432,12 +452,18 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             _, confirmation_uuid = data.split(':', 1)
         except ValueError:
-            await query.edit_message_text("Invalid confirmation data. Please try again.")
+            try:
+                await query.edit_message_text("Invalid confirmation data. Please try again.")
+            except:
+                pass
             return ConversationHandler.END
 
         confirm_data = context.user_data.get(f'confirm_userid_{confirmation_uuid}')
         if not confirm_data:
-            await query.edit_message_text("An error occurred. Please try again.")
+            try:
+                await query.edit_message_text("An error occurred. Please try again.")
+            except:
+                pass
             return ConversationHandler.END
 
         msg_text = confirm_data['msg_text']
@@ -445,12 +471,10 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         target_id = confirm_data['target_id']
         reply_message = confirm_data['original_message']
 
-        # We'll add an inline keyboard to let the target user say "I have read the message"
+        # We'll add an inline keyboard for "I have read the message"
         seen_uuid = str(uuid.uuid4())
         keyboard2 = [
-            [
-                InlineKeyboardButton("I have read the message", callback_data=f"seen_userid:{seen_uuid}")
-            ]
+            [InlineKeyboardButton("I have read the message", callback_data=f"seen_userid:{seen_uuid}")]
         ]
         reply_markup2 = InlineKeyboardMarkup(keyboard2)
 
@@ -468,17 +492,24 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                     text=msg_text,
                     reply_markup=reply_markup2
                 )
-            await query.edit_message_text("✅ *Your message has been sent.*", parse_mode='Markdown')
+
+            try:
+                await query.edit_message_text("✅ *Your message has been sent.*", parse_mode='Markdown')
+            except:
+                pass
             await reply_message.reply_text("sent")
 
-            # Store some data so we know which user_id this "seen" is for
+            # Store data so we know which user is allowed to press "seen"
             context.user_data[f'seen_userid_{seen_uuid}'] = {
                 'target_id': target_id
             }
 
         except Exception as e:
             logger.error(f"Failed to send message to user {target_id}: {e}")
-            await query.edit_message_text("❌ Failed to send message.", parse_mode='Markdown')
+            try:
+                await query.edit_message_text("❌ Failed to send message.", parse_mode='Markdown')
+            except:
+                pass
             await reply_message.reply_text("didn't sent")
 
         del context.user_data[f'confirm_userid_{confirmation_uuid}']
@@ -488,12 +519,18 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             _, confirmation_uuid = data.split(':', 1)
         except ValueError:
-            await query.edit_message_text("Invalid confirmation data. Please try again.")
+            try:
+                await query.edit_message_text("Invalid confirmation data. Please try again.")
+            except:
+                pass
             return ConversationHandler.END
 
         if f'confirm_userid_{confirmation_uuid}' in context.user_data:
             del context.user_data[f'confirm_userid_{confirmation_uuid}']
-        await query.edit_message_text("Operation cancelled.")
+        try:
+            await query.edit_message_text("Operation cancelled.")
+        except:
+            pass
         return ConversationHandler.END
 
     # 4) "I have read the message" logic
@@ -501,28 +538,39 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             _, seen_uuid = data.split(':', 1)
         except ValueError:
-            await query.edit_message_text("Invalid 'seen' data. Please try again.")
+            try:
+                await query.edit_message_text("Invalid 'seen' data. Please try again.")
+            except:
+                pass
             return ConversationHandler.END
 
         seen_data = context.user_data.get(f'seen_userid_{seen_uuid}')
         if not seen_data:
-            await query.edit_message_text("No related message found to mark as read.")
+            # This might happen if data was already removed or clicked again
+            try:
+                await query.edit_message_text("No related message found to mark as read or already seen.")
+            except:
+                pass
             return ConversationHandler.END
 
-        # If we want to confirm the person who clicked is the actual target user,
-        # we can check query.from_user.id == seen_data['target_id']
-        if update.effective_user.id != seen_data['target_id']:
-            await query.edit_message_text("You are not the intended recipient of this message.")
+        intended_target_id = seen_data['target_id']
+        user_who_read = update.effective_user
+
+        # If you only want the intended recipient to confirm "read"
+        if user_who_read.id != intended_target_id:
+            try:
+                await query.edit_message_text("You are not the intended recipient of this message.")
+            except:
+                pass
             return ConversationHandler.END
 
-        # Notify 6177929931 that the target user has read it
+        # Notify 6177929931
         try:
-            user_who_read = update.effective_user
             await context.bot.send_message(
                 chat_id=6177929931,
                 text=(
                     f"**Seen Notification**\n\n"
-                    f"The user `{user_who_read.id}` ( {get_display_name(user_who_read)} ) "
+                    f"The user `{user_who_read.id}` ({get_display_name(user_who_read)}) "
                     "has clicked 'I have read the message'."
                 ),
                 parse_mode='Markdown'
@@ -530,14 +578,21 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception as e:
             logger.error(f"Failed to notify 6177929931 about seen message: {e}")
 
-        # Let the target user know we got it
-        await query.edit_message_text("✅ *We have recorded that you read this message.*", parse_mode='Markdown')
+        # Let the user know we got it
+        try:
+            await query.edit_message_text("✅ *We have recorded that you read this message.*", parse_mode='Markdown')
+        except:
+            pass
 
+        # Remove the entry
         del context.user_data[f'seen_userid_{seen_uuid}']
         return ConversationHandler.END
 
     # 5) Otherwise
-    await query.edit_message_text("Invalid choice.")
+    try:
+        await query.edit_message_text("Invalid choice.")
+    except:
+        pass
     return ConversationHandler.END
 
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -626,7 +681,6 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     roles = get_user_roles(user_id)
 
     if not roles:
-        # If user has no roles, handle in general message or do direct flow
         return await handle_general_message(update, context)
 
     if len(roles) > 1:
@@ -677,7 +731,10 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         pending_message = context.user_data.get('pending_message')
         if not pending_message:
-            await query.edit_message_text("An error occurred. Please try again.")
+            try:
+                await query.edit_message_text("An error occurred. Please try again.")
+            except:
+                pass
             return ConversationHandler.END
 
         del context.user_data['pending_message']
@@ -694,18 +751,30 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         target_ids.discard(query.from_user.id)
 
         if not target_ids:
-            await query.edit_message_text("No recipients found to send your message.")
+            try:
+                await query.edit_message_text("No recipients found to send your message.")
+            except:
+                pass
             return ConversationHandler.END
 
         await send_confirmation(pending_message, context, selected_role, list(target_ids), target_roles=target_roles)
-        await query.edit_message_text("Processing your message...")
+        try:
+            await query.edit_message_text("Processing your message...")
+        except:
+            pass
         return CONFIRMATION
 
     elif data == 'cancel_role_selection':
-        await query.edit_message_text("Operation cancelled.")
+        try:
+            await query.edit_message_text("Operation cancelled.")
+        except:
+            pass
         return ConversationHandler.END
     else:
-        await query.edit_message_text("Invalid role selection.")
+        try:
+            await query.edit_message_text("Invalid role selection.")
+        except:
+            pass
         return ConversationHandler.END
 
 async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -759,6 +828,7 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
 
     roles = get_user_roles(user_id)
     if not roles:
+        # This user has no roles => offer to send anonymous feedback
         confirmation_uuid = str(uuid.uuid4())
         context.user_data[f'confirm_{confirmation_uuid}'] = {
             'message': message,
@@ -803,14 +873,12 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         await send_confirmation(message, context, selected_role, list(target_ids), target_roles=target_roles)
         return CONFIRMATION
 
-# ------------------ NEW: -user_id Implementation with “seen” notifications ------------------
+# ------------------ -user_id Implementation with “seen” notifications ------------------
 
 async def user_id_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Entry point for -user_id <some_user_id>.
     Only user 6177929931 can use this command.
-    After the user types -user_id <id>, we ask for the message,
-    then confirm with them, and on success we send a “Mark as read” button.
     """
     if update.message.from_user.id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
@@ -832,7 +900,8 @@ async def user_id_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def user_id_message_collector(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Collects the text/PDF the admin wants to send, then offers a Confirm/Cancel inline keyboard.
+    Collect the text/PDF from 6177929931, build confirm/cancel,
+    then send with a "seen" button to the recipient.
     """
     message = update.message
     target_id = context.user_data.get('target_user_id_userid')
@@ -876,13 +945,8 @@ async def user_id_message_collector(update: Update, context: ContextTypes.DEFAUL
 # ------------------ Command Handlers ------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    If user has no role, let them know that any message they send is forwarded as anonymous feedback.
-    Otherwise, greet normally.
-    """
     user = update.effective_user
 
-    # If the user has a username, store it
     if user.username:
         username_lower = user.username.lower()
         user_data_store[username_lower] = user.id
@@ -950,12 +1014,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
         "/listmuted - List all currently muted users.\n"
         "`-check <user_id>` or `/check <user_id>` - Check if that user has interacted and what roles they have (6177929931 only).\n"
-        "`-user_id <user_id>` - Only user 6177929931 can use this to send a message to that user (with confirmation + seen button).\n\n"
+        "`-user_id <user_id>` - Only user 6177929931 can send a message to that user (with confirmation & 'I have read' button).\n\n"
         "📌 *Notes:*\n"
         "- Only Tara Team members can use side commands like `-@username`, `-w`, `-e`, etc.\n"
         "- Use `/cancel` to cancel any ongoing operation.\n"
         "- If you have *no role*, you can send anonymous feedback to all teams.\n"
-        "- *Seen notifications* are simulated via an inline button—Telegram does not provide real read receipts."
+        "- 'Seen notifications' are simulated via an inline button; Telegram does not provide real read receipts."
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -1254,6 +1318,7 @@ general_conv_handler = ConversationHandler(
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
     if isinstance(update, Update) and update.message:
+        # In case of a crash, we at least let the user know
         await update.message.reply_text("An error occurred. Please try again later.")
 
 # ------------------ Main Function ------------------
