@@ -107,6 +107,7 @@ if USER_DATA_FILE.exists():
     with open(USER_DATA_FILE, 'r') as f:
         try:
             user_data_store = json.load(f)
+            # Convert keys to lowercase to ensure consistent lookups
             user_data_store = {k.lower(): v for k, v in user_data_store.items()}
             logger.info("Loaded existing user data from user_data.json.")
         except json.JSONDecodeError:
@@ -159,7 +160,7 @@ def save_muted_users():
 # ------------------ Helper Functions ------------------
 
 def get_display_name(user):
-    """Return the display name for a user."""
+    """Return the display name for a user (prefers @username)."""
     if user.username:
         return f"@{user.username}"
     else:
@@ -186,7 +187,7 @@ def get_role_selection_keyboard(roles):
 
 async def forward_message(bot, message, target_ids, sender_role):
     """
-    Forward or copy a message to the specified target_ids. 
+    Forward or copy a message to the specified target_ids.
     This includes the original sender's display name and role.
     """
     sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
@@ -217,6 +218,7 @@ async def forward_message(bot, message, target_ids, sender_role):
                 )
                 logger.info(f"Forwarded text message to {user_id}")
             else:
+                # If it's neither a text nor a document, forward the message
                 await bot.forward_message(
                     chat_id=user_id,
                     from_chat_id=message.chat.id,
@@ -248,6 +250,7 @@ async def forward_anonymous_message(bot, message, target_ids):
                     parse_mode='Markdown'
                 )
             else:
+                # If it's neither text nor document, forward the message as-is
                 await bot.forward_message(
                     chat_id=user_id,
                     from_chat_id=message.chat.id,
@@ -258,7 +261,7 @@ async def forward_anonymous_message(bot, message, target_ids):
 
 async def send_confirmation(message, context, sender_role, target_ids, target_roles=None):
     """
-    Send a confirm/cancel inline keyboard for a given message, 
+    Send a confirm/cancel inline keyboard for a given message,
     storing the necessary data in context.user_data for follow-up.
     """
     if message.document:
@@ -271,7 +274,8 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
     if target_roles:
         target_roles_display = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
     else:
-        target_roles_display = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in SENDING_ROLE_TARGETS.get(sender_role, [])]
+        target_roles_display = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) 
+                                for r in SENDING_ROLE_TARGETS.get(sender_role, [])]
 
     confirmation_text = (
         f"📩 *You are about to send the following to **{', '.join(target_roles_display)}**:*\n\n"
@@ -391,7 +395,9 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                     except:
                         recipient_display_names.append(str(tid))
             else:
-                recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles if r != 'specific_user']
+                recipient_display_names = [
+                    ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles if r != 'specific_user'
+                ]
 
             if message_to_send.document:
                 confirmation_text = (
@@ -713,10 +719,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Show a list of *all* users who have started the bot,
+    with both their usernames and IDs.
+    (Only Tara Team and user 6177929931 can use this command.)
+    """
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
-    if 'tara_team' not in roles:
+    # Let Tara Team and also special ID 6177929931 use this command
+    if 'tara_team' not in roles and user_id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
@@ -724,14 +736,22 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No users have interacted with the bot yet.")
         return
 
-    user_list = "\n".join([f"@{username}: {uid}" for username, uid in user_data_store.items()])
-    await update.message.reply_text(f"**Registered Users:**\n{user_list}", parse_mode='Markdown')
+    # Build a list with username + ID
+    user_lines = []
+    for username, uid in user_data_store.items():
+        user_lines.append(f"@{username} => {uid}")
+
+    user_list = "\n".join(user_lines)
+    await update.message.reply_text(
+        f"**Registered Users (Username => ID):**\n\n{user_list}",
+        parse_mode='Markdown'
+    )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "📘 *Available Commands:*\n\n"
         "/start - Initialize interaction with the bot.\n"
-        "/listusers - List all registered users (Tara Team only).\n"
+        "/listusers - List all registered users (Tara Team or user 6177929931 only).\n"
         "/help - Show this help message.\n"
         "/refresh - Refresh your user information.\n"
         "/cancel - Cancel the current operation.\n\n"
@@ -746,16 +766,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`-d` - Send a message to the Digital Writers.\n"
         "`-de` - Send a message to the Design Team.\n"
         "`-mf` - Send a message to the Mind Map & Form Creation Team.\n\n"
-        "*Admin Commands (Tara Team only):*\n"
+        "*Admin Commands (Tara Team only or user 6177929931):*\n"
         "/mute [user_id] - Mute yourself or another user.\n"
         "/muteid <user_id> - Mute a specific user by their ID.\n"
         "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
-        "/listmuted - List all currently muted users.\n\n"
+        "/listmuted - List all currently muted users.\n"
+        "`-check <user_id>` - Check if that user has interacted and what roles they have (6177929931 only).\n\n"
         "📌 *Notes:*\n"
         "- Only Tara Team members can use side commands and `-@username` command.\n"
         "- Use `/cancel` to cancel any ongoing operation.\n"
-        "- If you have *no role*, you can send anonymous feedback to all teams. "
-        
+        "- If you have *no role*, you can send anonymous feedback to all teams."
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -778,7 +798,8 @@ async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
-    if 'tara_team' not in roles:
+    # Let Tara Team and special ID 6177929931 use mute
+    if 'tara_team' not in roles and user_id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
@@ -819,13 +840,15 @@ async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"User ID {target_user_id} has been muted.")
 
 async def mute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Alias for /mute command."""
     await mute_command(update, context)
 
 async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
-    if 'tara_team' not in roles:
+    # Let Tara Team and special ID 6177929931 use unmute
+    if 'tara_team' not in roles and user_id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
@@ -860,7 +883,8 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.message.from_user.id
     roles = get_user_roles(user_id)
 
-    if 'tara_team' not in roles:
+    # Let Tara Team and special ID 6177929931 use listmuted
+    if 'tara_team' not in roles and user_id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
@@ -871,8 +895,8 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     muted_list = []
     for uid in muted_users:
         username = None
-        for uname, id_ in user_data_store.items():
-            if id_ == uid:
+        for uname, stored_id in user_data_store.items():
+            if stored_id == uid:
                 username = uname
                 break
         if username:
@@ -883,22 +907,85 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     muted_users_text = "\n".join(muted_list)
     await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
 
+# ------------------ NEW: /check or -check <user_id> trigger ------------------
+
+async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    A command that can only be used by user_id == 6177929931.
+    It checks if a user ID has interacted with the bot and if so,
+    shows their roles.
+    """
+    user_id = update.message.from_user.id
+    if user_id != 6177929931:
+        await update.message.reply_text("You are not authorized to use this command.")
+        return
+
+    # Check that we have exactly 1 argument: user_id
+    if len(context.args) != 1:
+        await update.message.reply_text("Usage: -check <user_id>", parse_mode='Markdown')
+        return
+
+    try:
+        check_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Please provide a valid user ID to check.", parse_mode='Markdown')
+        return
+
+    # Attempt to see if this user_id is in user_data_store
+    # user_data_store is username => user_id, so let's see if check_id is a value
+    username_found = None
+    for uname, uid in user_data_store.items():
+        if uid == check_id:
+            username_found = uname
+            break
+
+    if not username_found:
+        await update.message.reply_text(f"No record found for user ID {check_id}.", parse_mode='Markdown')
+        return
+
+    # If found, let's see what roles the user has
+    roles = get_user_roles(check_id)
+    if roles:
+        roles_display = ", ".join([ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in roles])
+    else:
+        roles_display = "No role (anonymous feedback user)."
+
+    await update.message.reply_text(
+        f"User ID: `{check_id}`\nUsername: `@{username_found}`\nRoles: {roles_display}",
+        parse_mode='Markdown'
+    )
+
 # ------------------ Conversation Handlers ------------------
 
 specific_user_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(re.compile(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', re.IGNORECASE)), specific_user_trigger)],
+    entry_points=[
+        MessageHandler(
+            filters.Regex(re.compile(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', re.IGNORECASE)),
+            specific_user_trigger
+        )
+    ],
     states={
-        SPECIFIC_USER_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
+        SPECIFIC_USER_MESSAGE: [
+            MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)
+        ],
+        CONFIRMATION: [
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')
+        ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
 
 specific_team_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|c)$', re.IGNORECASE)), specific_team_trigger)],
+    entry_points=[
+        MessageHandler(filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|c)$', re.IGNORECASE)), specific_team_trigger)
+    ],
     states={
-        SPECIFIC_TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
+        SPECIFIC_TEAM_MESSAGE: [
+            MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)
+        ],
+        CONFIRMATION: [
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')
+        ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -906,9 +993,15 @@ specific_team_conv_handler = ConversationHandler(
 team_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-team$', re.IGNORECASE)), team_trigger)],
     states={
-        TEAM_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)],
-        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
+        TEAM_MESSAGE: [
+            MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)
+        ],
+        SELECT_ROLE: [
+            CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')
+        ],
+        CONFIRMATION: [
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')
+        ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
@@ -916,32 +1009,46 @@ team_conv_handler = ConversationHandler(
 tara_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(re.compile(r'^-t$', re.IGNORECASE)), tara_trigger)],
     states={
-        TARA_MESSAGE: [MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
+        TARA_MESSAGE: [
+            MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)
+        ],
+        CONFIRMATION: [
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')
+        ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
 )
 
 general_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(
-        (filters.TEXT | filters.Document.ALL) &
-        ~filters.COMMAND &
-        ~filters.Regex(re.compile(r'^-@')) &
-        ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team)$', re.IGNORECASE)),
-        handle_general_message
-    )],
+    entry_points=[
+        MessageHandler(
+            (filters.TEXT | filters.Document.ALL)
+            & ~filters.COMMAND
+            & ~filters.Regex(re.compile(r'^-@'))
+            & ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team)$', re.IGNORECASE)),
+            handle_general_message
+        )
+    ],
     states={
-        SELECT_ROLE: [CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')],
-        CONFIRMATION: [CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')],
+        SELECT_ROLE: [
+            CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')
+        ],
+        CONFIRMATION: [
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:).*')
+        ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     allow_reentry=True,
 )
 
+# ------------------ Error Handler ------------------
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
     if isinstance(update, Update) and update.message:
         await update.message.reply_text("An error occurred. Please try again later.")
+
+# ------------------ Main Function ------------------
 
 def main():
     BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -951,6 +1058,7 @@ def main():
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
+    # Standard command handlers
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('listusers', list_users))
     application.add_handler(CommandHandler('help', help_command))
@@ -960,6 +1068,15 @@ def main():
     application.add_handler(CommandHandler('unmuteid', unmute_id_command))
     application.add_handler(CommandHandler('listmuted', list_muted_command))
 
+    # The new -check <user_id> command for user 6177929931 only
+    application.add_handler(CommandHandler('check', check_user_command))
+    # Alternatively, if you want it triggered by a dash, you can do:
+    application.add_handler(MessageHandler(
+        filters.Regex(re.compile(r'^-check\s+(\d+)$', re.IGNORECASE)),
+        check_user_command
+    ))
+
+    # Conversation handlers
     application.add_handler(specific_user_conv_handler)
     application.add_handler(specific_team_conv_handler)
     application.add_handler(team_conv_handler)
