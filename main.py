@@ -376,8 +376,6 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         confirm_data = context.user_data.get(f'confirm_{confirmation_uuid}')
 
         if not confirm_data:
-            # 2B) Additional check for -user_id confirmations
-            # e.g. data might start with confirm_userid: or cancel_userid:
             pass
         else:
             if action == 'confirm':
@@ -430,7 +428,6 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # 3) Check if we have new callback data for user_id
     if data.startswith("confirm_userid:"):
-        # e.g. confirm_userid:1234-5678-...
         try:
             _, confirmation_uuid = data.split(':', 1)
         except ValueError:
@@ -442,7 +439,6 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.edit_message_text("An error occurred. Please try again.")
             return ConversationHandler.END
 
-        # Do the actual sending
         msg_text = confirm_data['msg_text']
         msg_doc = confirm_data['msg_doc']
         target_id = confirm_data['target_id']
@@ -450,14 +446,12 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
         try:
             if msg_doc:
-                # It's a document
                 await context.bot.send_document(
                     chat_id=target_id,
                     document=msg_doc.file_id,
                     caption=msg_doc.caption or ""
                 )
             else:
-                # It's text only
                 await context.bot.send_message(
                     chat_id=target_id,
                     text=msg_text
@@ -479,14 +473,12 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.edit_message_text("Invalid confirmation data. Please try again.")
             return ConversationHandler.END
 
-        # Just remove from user_data
         if f'confirm_userid_{confirmation_uuid}' in context.user_data:
             del context.user_data[f'confirm_userid_{confirmation_uuid}']
         await query.edit_message_text("Operation cancelled.")
         return ConversationHandler.END
 
     else:
-        # No recognized pattern
         await query.edit_message_text("Invalid choice.")
         return ConversationHandler.END
 
@@ -710,10 +702,10 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
 
     roles = get_user_roles(user_id)
     # -----------------------------------------
-    # NEW LOGIC FOR NO-ROLE (ANONYMOUS FEEDBACK)
+    # LOGIC FOR NO-ROLE (ANONYMOUS FEEDBACK)
     # -----------------------------------------
     if not roles:
-        # This user has no assigned roles. Ask for confirmation to send anonymous feedback.
+        # The user has no assigned roles. Ask for confirmation to send anonymous feedback.
         confirmation_uuid = str(uuid.uuid4())
         context.user_data[f'confirm_{confirmation_uuid}'] = {
             'message': message,
@@ -841,23 +833,33 @@ async def user_id_message_collector(update: Update, context: ContextTypes.DEFAUL
 # ------------------ Command Handlers ------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    When a user starts the bot, if they have no role, we'll tell them
+    they can send anonymous feedback. Otherwise, we greet them normally.
+    """
     user = update.effective_user
-    if not user.username:
-        await update.message.reply_text(
-            "Please set a Telegram username in your profile to use specific commands like `-@username`.",
-            parse_mode='Markdown'
-        )
-        return
 
-    username_lower = user.username.lower()
-    user_data_store[username_lower] = user.id
-    save_user_data()
+    # If the user has a username, store it
+    if user.username:
+        username_lower = user.username.lower()
+        user_data_store[username_lower] = user.id
+        save_user_data()
 
     display_name = get_display_name(user)
-    await update.message.reply_text(
-        f"Hello, {display_name}! Welcome to the Team Communication Bot.\n\n"
-        "Feel free to send messages using the available commands."
-    )
+    roles = get_user_roles(user.id)
+
+    # If the user has no role, let them know they can send anonymous feedback.
+    if not roles:
+        await update.message.reply_text(
+            f"Hello, {display_name}! You currently have no role assigned.\n"
+            "Any message you send me will be forwarded to all teams as *anonymous feedback*.\n"
+            "Feel free to send your feedback now."
+        )
+    else:
+        await update.message.reply_text(
+            f"Hello, {display_name}! Welcome to the Team Communication Bot.\n\n"
+            "Feel free to send messages using the available commands."
+        )
 
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -1068,7 +1070,6 @@ async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # If context.args is None, it means the trigger likely came from "-check <user_id>"
     if context.args is None or len(context.args) == 0:
-        # Parse from the raw text
         message_text = update.message.text.strip()
         match = re.match(r'^-check\s+(\d+)$', message_text, re.IGNORECASE)
         if not match:
@@ -1086,7 +1087,6 @@ async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("Please provide a valid user ID.", parse_mode='Markdown')
             return
 
-    # Now check if this user ID is in user_data_store
     username_found = None
     for uname, uid in user_data_store.items():
         if uid == check_id:
@@ -1097,7 +1097,6 @@ async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(f"No record found for user ID {check_id}.", parse_mode='Markdown')
         return
 
-    # If found, let's see what roles the user has
     roles = get_user_roles(check_id)
     if roles:
         roles_display = ", ".join(ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in roles)
@@ -1109,7 +1108,7 @@ async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode='Markdown'
     )
 
-# ------------------ Conversation Handlers ------------------
+# ------------------ NEW: Conversation Handler for -user_id  ------------------
 
 user_id_conv_handler = ConversationHandler(
     entry_points=[
@@ -1124,7 +1123,10 @@ user_id_conv_handler = ConversationHandler(
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, user_id_message_collector)
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
+            CallbackQueryHandler(
+                confirmation_handler,
+                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
+            )
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1142,7 +1144,10 @@ specific_user_conv_handler = ConversationHandler(
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
+            CallbackQueryHandler(
+                confirmation_handler,
+                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
+            )
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1157,7 +1162,10 @@ specific_team_conv_handler = ConversationHandler(
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
+            CallbackQueryHandler(
+                confirmation_handler,
+                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
+            )
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1173,7 +1181,10 @@ team_conv_handler = ConversationHandler(
             CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
+            CallbackQueryHandler(
+                confirmation_handler,
+                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
+            )
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1186,7 +1197,10 @@ tara_conv_handler = ConversationHandler(
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
+            CallbackQueryHandler(
+                confirmation_handler,
+                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
+            )
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1207,7 +1221,10 @@ general_conv_handler = ConversationHandler(
             CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
+            CallbackQueryHandler(
+                confirmation_handler,
+                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
+            )
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1251,7 +1268,7 @@ def main():
     )
 
     # Conversation handlers
-    application.add_handler(user_id_conv_handler)       # NEW for -user_id <id>
+    application.add_handler(user_id_conv_handler)       
     application.add_handler(specific_user_conv_handler)
     application.add_handler(specific_team_conv_handler)
     application.add_handler(team_conv_handler)
