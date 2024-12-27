@@ -2,7 +2,7 @@
 
 WRITER_IDS = {7491629866, 6177929931 , 7030185248 , 1024916176 , 585812065 , 6969704654 , 1162719050 , 6377619159 , 935602501 , 6702007291 , 6554665}          # Replace with actual writer user IDs
 MCQS_TEAM_IDS = {6690281336 , 6177929931 , 1141773086 , 65456664 , 1414370194 }       # Replace with actual MCQs team user IDs
-CHECKER_TEAM_IDS = {591536381 , 6177929931 , 1414370194 ,  65556765 , 523278185 , 933155332 }    # Replace with actual checker team user IDs
+CHECKER_TEAM_IDS = {591536381 , 6177929931 , 1414370194 ,  65556765 , 523278185 , 933155332 , 1244575362 }    # Replace with actual checker team user IDs
 WORD_TEAM_IDS = {7491629866 , 6177929931 , 758645645 , 65557544}       # Replace with actual word team user IDs
 DESIGN_TEAM_IDS = {7030185248 , 6177929931 , 7354567 , 65445 }     # Replace with actual design team user IDs
 KING_TEAM_IDS = {56676 , 73545678 , 6898449897}     # Replace with actual king team user IDs
