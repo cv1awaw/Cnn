@@ -130,6 +130,7 @@ def get_user_roles(user_id):
     """Determine all roles of a user based on their user ID."""
     roles = []
     for role, ids in ROLE_MAP.items():
+        # role-lists/sets come from roles.py; we do not overwrite them, just mutate in memory if needed
         if user_id in ids:
             roles.append(role)
     return roles
@@ -830,6 +831,96 @@ async def user_id_message_collector(update: Update, context: ContextTypes.DEFAUL
     del context.user_data['target_user_id_userid']
     return CONFIRMATION
 
+# ------------------ NEW FEATURE: ADD OR REMOVE A ROLE  ------------------
+
+async def roleadd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /roleadd <user_id> <role_name>
+    Only user 6177929931 can use this command.
+    Adds the specified user to the specified role, if valid.
+    """
+    if update.message.from_user.id != 6177929931:
+        await update.message.reply_text("You are not authorized to use this command.")
+        return
+
+    if len(context.args) != 2:
+        await update.message.reply_text("Usage: /roleadd <user_id> <role_name>")
+        return
+
+    try:
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Please provide a valid user ID.")
+        return
+
+    role_name = context.args[1].strip().lower()
+    if role_name not in ROLE_MAP:
+        valid_roles = ", ".join(ROLE_MAP.keys())
+        await update.message.reply_text(
+            f"Invalid role name. Valid roles are: {valid_roles}"
+        )
+        return
+
+    # Attempt to add the user to the role
+    role_list_or_set = ROLE_MAP[role_name]
+    if target_user_id in role_list_or_set:
+        await update.message.reply_text("User is already in that role.")
+        return
+
+    # If these IDs are sets, we do add(). If lists, we do append().
+    # Many devs store these as sets, but check your roles.py usage.
+    if isinstance(role_list_or_set, set):
+        role_list_or_set.add(target_user_id)
+    else:
+        role_list_or_set.append(target_user_id)
+
+    await update.message.reply_text(
+        f"User ID {target_user_id} has been added to role '{role_name}'."
+    )
+
+async def roleremove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /role_r <user_id> <role_name>
+    Only user 6177929931 can use this command.
+    Removes the specified user from the specified role, if present.
+    """
+    if update.message.from_user.id != 6177929931:
+        await update.message.reply_text("You are not authorized to use this command.")
+        return
+
+    if len(context.args) != 2:
+        await update.message.reply_text("Usage: /role_r <user_id> <role_name>")
+        return
+
+    try:
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Please provide a valid user ID.")
+        return
+
+    role_name = context.args[1].strip().lower()
+    if role_name not in ROLE_MAP:
+        valid_roles = ", ".join(ROLE_MAP.keys())
+        await update.message.reply_text(
+            f"Invalid role name. Valid roles are: {valid_roles}"
+        )
+        return
+
+    role_list_or_set = ROLE_MAP[role_name]
+    if target_user_id not in role_list_or_set:
+        await update.message.reply_text("User is not in that role.")
+        return
+
+    # Remove the user
+    if isinstance(role_list_or_set, set):
+        role_list_or_set.remove(target_user_id)
+    else:
+        role_list_or_set.remove(target_user_id)
+
+    await update.message.reply_text(
+        f"User ID {target_user_id} has been removed from role '{role_name}'."
+    )
+
 # ------------------ Command Handlers ------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -891,6 +982,7 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    valid_roles = ", ".join(ROLE_MAP.keys())
     help_text = (
         "📘 *Available Commands:*\n\n"
         "/start - Initialize interaction with the bot.\n"
@@ -916,6 +1008,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/listmuted - List all currently muted users.\n"
         "`-check <user_id>` or `/check <user_id>` - Check if that user has interacted and what roles they have (6177929931 only).\n"
         "`-user_id <user_id>` - Only user 6177929931 can use this to send a message to that user (with confirmation).\n\n"
+        "*Role Management (6177929931 only):*\n"
+        f"/roleadd <user_id> <role_name> - Add a user to one of the following roles: {valid_roles}\n"
+        f"/role_r <user_id> <role_name> - Remove a user from one of the above roles.\n\n"
         "📌 *Notes:*\n"
         "- Only Tara Team members can use side commands like `-@username`, `-w`, `-e`, etc.\n"
         "- Use `/cancel` to cancel any ongoing operation.\n"
@@ -1267,8 +1362,12 @@ def main():
         )
     )
 
+    # NEW role management commands (only user ID 6177929931)
+    application.add_handler(CommandHandler('roleadd', roleadd_command))
+    application.add_handler(CommandHandler('role_r', roleremove_command))
+
     # Conversation handlers
-    application.add_handler(user_id_conv_handler)       
+    application.add_handler(user_id_conv_handler)
     application.add_handler(specific_user_conv_handler)
     application.add_handler(specific_team_conv_handler)
     application.add_handler(team_conv_handler)
