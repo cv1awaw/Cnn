@@ -97,8 +97,6 @@ SPECIFIC_USER_MESSAGE = 3
 TARA_MESSAGE = 4
 CONFIRMATION = 5
 SELECT_ROLE = 6
-# We no longer need USERID_MESSAGE because we'll confirm immediately
-# USERID_MESSAGE = 7
 
 # ------------------ User Data Storage ------------------
 
@@ -130,7 +128,6 @@ def get_user_roles(user_id):
     """Determine all roles of a user based on their user ID."""
     roles = []
     for role, ids in ROLE_MAP.items():
-        # role-lists/sets come from roles.py; we do not overwrite them, just mutate in memory if needed
         if user_id in ids:
             roles.append(role)
     return roles
@@ -366,7 +363,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         del context.user_data[f'confirm_{confirmation_uuid}']
         return ConversationHandler.END
 
-    # 2) Normal confirm/cancel logic (existing)
+    # 2) Normal confirm/cancel logic
     if data.startswith('confirm:') or data.startswith('cancel:'):
         try:
             action, confirmation_uuid = data.split(':', 1)
@@ -484,9 +481,12 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    roles = get_user_roles(user_id)
+    user_id = update.effective_user.id if update.effective_user else None
+    if not user_id:
+        await update.message.reply_text("Could not determine your user ID.")
+        return ConversationHandler.END
 
+    roles = get_user_roles(user_id)
     if 'tara_team' not in roles:
         await update.message.reply_text("You are not authorized to use this command.")
         return ConversationHandler.END
@@ -526,9 +526,12 @@ async def specific_user_message_handler(update: Update, context: ContextTypes.DE
     return CONFIRMATION
 
 async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    roles = get_user_roles(user_id)
+    user_id = update.effective_user.id if update.effective_user else None
+    if not user_id:
+        await update.message.reply_text("Could not determine your user ID.")
+        return ConversationHandler.END
 
+    roles = get_user_roles(user_id)
     if 'tara_team' not in roles:
         await update.message.reply_text("You are not authorized to use this command.")
         return ConversationHandler.END
@@ -554,7 +557,10 @@ async def specific_team_message_handler(update: Update, context: ContextTypes.DE
     for target_role in target_roles:
         target_ids.update(ROLE_MAP.get(target_role, []))
 
-    target_ids.discard(update.message.from_user.id)
+    # Remove self from recipients
+    user_id = update.effective_user.id if update.effective_user else None
+    if user_id and user_id in target_ids:
+        target_ids.remove(user_id)
 
     if not target_ids:
         await message.reply_text("No recipients found to send your message.")
@@ -565,11 +571,16 @@ async def specific_team_message_handler(update: Update, context: ContextTypes.DE
     return CONFIRMATION
 
 async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
+    user = update.effective_user
+    if not user:
+        await update.message.reply_text("Could not determine your user.")
+        return ConversationHandler.END
+
+    user_id = user.id
     roles = get_user_roles(user_id)
 
     if not roles:
-        # If user has no roles, handle in general message or do direct flow
+        # If user has no roles, handle in general message
         return await handle_general_message(update, context)
 
     if len(roles) > 1:
@@ -588,10 +599,10 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    user_id = message.from_user.id
+    user_id = update.effective_user.id if update.effective_user else None
     selected_role = context.user_data.get('sender_role')
 
-    if not selected_role:
+    if not selected_role or not user_id:
         await message.reply_text("An error occurred. Please try again.")
         return ConversationHandler.END
 
@@ -600,7 +611,8 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     for role in target_roles:
         target_ids.update(ROLE_MAP.get(role, []))
 
-    target_ids.discard(user_id)
+    if user_id in target_ids:
+        target_ids.remove(user_id)
 
     if not target_ids:
         await message.reply_text("No recipients found to send your message.")
@@ -634,7 +646,10 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         target_ids = set()
         for role in target_roles:
             target_ids.update(ROLE_MAP.get(role, []))
-        target_ids.discard(query.from_user.id)
+
+        user_id = query.from_user.id
+        if user_id in target_ids:
+            target_ids.remove(user_id)
 
         if not target_ids:
             await query.edit_message_text("No recipients found to send your message.")
@@ -652,11 +667,14 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
 async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    roles = get_user_roles(user_id)
+    user = update.effective_user
+    if not user:
+        await update.message.reply_text("Could not determine your user.")
+        return ConversationHandler.END
 
+    roles = get_user_roles(user.id)
+    # If user has no roles, handle in general message or do direct flow
     if not roles:
-        # If user has no roles, handle in general message or do direct flow
         return await handle_general_message(update, context)
 
     context.user_data['sender_role'] = roles[0]
@@ -665,15 +683,16 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    user_id = message.from_user.id
+    user_id = update.effective_user.id if update.effective_user else None
     sender_role = context.user_data.get('sender_role')
 
-    if not sender_role:
+    if not sender_role or not user_id:
         return ConversationHandler.END
 
     target_roles = ['tara_team']
     target_ids = set(ROLE_MAP.get('tara_team', []))
-    target_ids.discard(user_id)
+    if user_id in target_ids:
+        target_ids.remove(user_id)
 
     if not target_ids:
         await message.reply_text("No recipients found to send your message.")
@@ -687,13 +706,17 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
     if not message:
         return ConversationHandler.END
 
-    user_id = message.from_user.id
+    user = update.effective_user
+    if not user:
+        return ConversationHandler.END
+
+    user_id = user.id
 
     if user_id in muted_users:
         await message.reply_text("You have been muted and cannot send messages through this bot.")
         return ConversationHandler.END
 
-    username = message.from_user.username
+    username = user.username
     if username:
         username_lower = username.lower()
         previous_id = user_data_store.get(username_lower)
@@ -702,11 +725,9 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
             save_user_data()
 
     roles = get_user_roles(user_id)
-    # -----------------------------------------
-    # LOGIC FOR NO-ROLE (ANONYMOUS FEEDBACK)
-    # -----------------------------------------
+
+    # If user has no role, ask for confirmation to send as anonymous feedback
     if not roles:
-        # The user has no assigned roles. Ask for confirmation to send anonymous feedback.
         confirmation_uuid = str(uuid.uuid4())
         context.user_data[f'confirm_{confirmation_uuid}'] = {
             'message': message,
@@ -725,7 +746,6 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
             reply_markup=reply_markup
         )
         return CONFIRMATION
-    # -----------------------------------------
 
     if len(roles) > 1:
         keyboard = get_role_selection_keyboard(roles)
@@ -743,7 +763,8 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         target_ids = set()
         for role in target_roles:
             target_ids.update(ROLE_MAP.get(role, []))
-        target_ids.discard(user_id)
+        if user_id in target_ids:
+            target_ids.remove(user_id)
 
         if not target_ids:
             await message.reply_text("No recipients found to send your message.")
@@ -755,18 +776,11 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
 # ------------------ NEW: -user_id Implementation with confirmation ------------------
 
 async def user_id_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Entry point for -user_id <some_user_id>.
-    Only user 6177929931 can use this command.
-    After the user types -user_id <id>, we ask for the message,
-    and then show a confirmation inline keyboard.
-    """
-    # 1) Check if the caller is user 6177929931
-    if update.message.from_user.id != 6177929931:
+    # Only user 6177929931 can use this command
+    if update.effective_user.id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return ConversationHandler.END
 
-    # 2) Extract the target user ID
     message_text = update.message.text.strip()
     match = re.match(r'^-user_id\s+(\d+)$', message_text, re.IGNORECASE)
     if not match:
@@ -775,27 +789,20 @@ async def user_id_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     target_id = int(match.group(1))
 
-    # 3) Prompt for message
     await update.message.reply_text(
-        f"Please write the message (text or PDF) you want to send to user ID {target_id}."
-        "\nThen I'll ask for confirmation."
+        f"Please write the message (text or PDF) you want to send to user ID {target_id}.\n"
+        "Then I'll ask for confirmation."
     )
-    # Store the target_id in user_data for next step
     context.user_data['target_user_id_userid'] = target_id
-    return SPECIFIC_USER_MESSAGE  # We'll reuse SPECIFIC_USER_MESSAGE to intercept any message.
+    return SPECIFIC_USER_MESSAGE
 
 async def user_id_message_collector(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    This is triggered after the user typed -user_id <id> and we asked them for the message.
-    We'll build a confirm_userid callback, store the data, and present Confirm/Cancel.
-    """
     message = update.message
     target_id = context.user_data.get('target_user_id_userid')
     if not target_id:
         await message.reply_text("An error occurred. Please try again.")
         return ConversationHandler.END
 
-    # Build a preview text for what they'll send
     if message.document:
         content_description = f"PDF: `{message.document.file_name}`"
     elif message.text:
@@ -819,27 +826,19 @@ async def user_id_message_collector(update: Update, context: ContextTypes.DEFAUL
     reply_markup = InlineKeyboardMarkup(keyboard)
     await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
 
-    # We'll store everything we need in user_data
     context.user_data[f'confirm_userid_{confirmation_uuid}'] = {
         'target_id': target_id,
-        'original_message': message,  # We'll use this to reply "sent" or "didn't sent"
+        'original_message': message,
         'msg_text': message.text if message.text else "",
         'msg_doc': message.document if message.document else None,
     }
-
-    # We can now remove 'target_user_id_userid' since we won't need it again
     del context.user_data['target_user_id_userid']
     return CONFIRMATION
 
-# ------------------ NEW FEATURE: ADD OR REMOVE A ROLE  ------------------
+# ------------------ NEW FEATURE: ADD OR REMOVE A ROLE ------------------
 
 async def roleadd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /roleadd <user_id> <role_name>
-    Only user 6177929931 can use this command.
-    Adds the specified user to the specified role, if valid.
-    """
-    if update.message.from_user.id != 6177929931:
+    if update.effective_user.id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
@@ -861,14 +860,11 @@ async def roleadd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Attempt to add the user to the role
     role_list_or_set = ROLE_MAP[role_name]
     if target_user_id in role_list_or_set:
         await update.message.reply_text("User is already in that role.")
         return
 
-    # If these IDs are sets, we do add(). If lists, we do append().
-    # Many devs store these as sets, but check your roles.py usage.
     if isinstance(role_list_or_set, set):
         role_list_or_set.add(target_user_id)
     else:
@@ -879,12 +875,7 @@ async def roleadd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def roleremove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /role_r <user_id> <role_name>
-    Only user 6177929931 can use this command.
-    Removes the specified user from the specified role, if present.
-    """
-    if update.message.from_user.id != 6177929931:
+    if update.effective_user.id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
@@ -911,7 +902,6 @@ async def roleremove_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("User is not in that role.")
         return
 
-    # Remove the user
     if isinstance(role_list_or_set, set):
         role_list_or_set.remove(target_user_id)
     else:
@@ -924,22 +914,15 @@ async def roleremove_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ------------------ Command Handlers ------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    When a user starts the bot, if they have no role, we'll tell them
-    they can send anonymous feedback. Otherwise, we greet them normally.
-    """
     user = update.effective_user
-
-    # If the user has a username, store it
-    if user.username:
+    if user and user.username:
         username_lower = user.username.lower()
         user_data_store[username_lower] = user.id
         save_user_data()
 
-    display_name = get_display_name(user)
-    roles = get_user_roles(user.id)
+    display_name = get_display_name(user) if user else "there"
+    roles = get_user_roles(user.id) if user else []
 
-    # If the user has no role, let them know they can send anonymous feedback.
     if not roles:
         await update.message.reply_text(
             f"Hello, {display_name}! You currently have no role assigned.\n"
@@ -953,15 +936,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Show a list of *all* users who have started the bot,
-    with both their usernames and IDs.
-    (Only Tara Team and user 6177929931 can use this command.)
-    """
-    user_id = update.message.from_user.id
+    """List all registered users (username => ID), restricted to Tara Team or user 6177929931."""
+    user = update.effective_user
+    if not user:
+        await update.message.reply_text("Could not determine your user.")
+        return
+
+    user_id = user.id
     roles = get_user_roles(user_id)
 
-    # Let Tara Team and also special ID 6177929931 use this command
+    # Let Tara Team and special ID 6177929931 use this command
     if 'tara_team' not in roles and user_id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return
@@ -970,12 +954,9 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No users have interacted with the bot yet.")
         return
 
-    # Build a list with username + ID
-    user_lines = []
-    for username, uid in user_data_store.items():
-        user_lines.append(f"@{username} => {uid}")
-
+    user_lines = [f"@{username} => {uid}" for username, uid in user_data_store.items()]
     user_list = "\n".join(user_lines)
+
     await update.message.reply_text(
         f"**Registered Users (Username => ID):**\n\n{user_list}",
         parse_mode='Markdown'
@@ -1020,7 +1001,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if not user.username:
+    if not user or not user.username:
         await update.message.reply_text(
             "Please set a Telegram username in your profile to refresh your information.",
             parse_mode='Markdown'
@@ -1034,10 +1015,14 @@ async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Your information has been refreshed successfully.")
 
 async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
+    user = update.effective_user
+    if not user:
+        await update.message.reply_text("Could not determine your user.")
+        return
+
+    user_id = user.id
     roles = get_user_roles(user_id)
 
-    # Let Tara Team and special ID 6177929931 use mute
     if 'tara_team' not in roles and user_id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return
@@ -1079,14 +1064,18 @@ async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"User ID {target_user_id} has been muted.")
 
 async def mute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Alias for /mute command."""
+    # Alias for /mute
     await mute_command(update, context)
 
 async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
+    user = update.effective_user
+    if not user:
+        await update.message.reply_text("Could not determine your user.")
+        return
+
+    user_id = user.id
     roles = get_user_roles(user_id)
 
-    # Let Tara Team and special ID 6177929931 use unmute
     if 'tara_team' not in roles and user_id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return
@@ -1119,10 +1108,14 @@ async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"User ID {target_user_id} is not muted.")
 
 async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
+    user = update.effective_user
+    if not user:
+        await update.message.reply_text("Could not determine your user.")
+        return
+
+    user_id = user.id
     roles = get_user_roles(user_id)
 
-    # Let Tara Team and special ID 6177929931 use listmuted
     if 'tara_team' not in roles and user_id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return
@@ -1146,25 +1139,15 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     muted_users_text = "\n".join(muted_list)
     await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
 
-# ------------------ FIXED: /check or -check <user_id> ------------------
-
 async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    This command can be triggered either by:
-    1. /check <user_id>
-    2. -check <user_id> (via a MessageHandler + regex)
-
-    Because context.args is only set for slash commands,
-    we need to parse manually if the user typed "-check <user_id>".
-    """
     # Only user_id 6177929931 can use this
-    user_id = update.message.from_user.id
-    if user_id != 6177929931:
+    user = update.effective_user
+    if not user or user.id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return
 
-    # If context.args is None, it means the trigger likely came from "-check <user_id>"
-    if context.args is None or len(context.args) == 0:
+    # If context.args is None, it might be from -check <user_id>
+    if (context.args is None or len(context.args) == 0) and update.message:
         message_text = update.message.text.strip()
         match = re.match(r'^-check\s+(\d+)$', message_text, re.IGNORECASE)
         if not match:
@@ -1172,7 +1155,7 @@ async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
         check_id = int(match.group(1))
     else:
-        # The user typed /check <user_id>, so context.args should contain the ID
+        # The user typed /check <user_id>
         if len(context.args) != 1:
             await update.message.reply_text("Usage: /check <user_id>", parse_mode='Markdown')
             return
@@ -1203,7 +1186,7 @@ async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode='Markdown'
     )
 
-# ------------------ NEW: Conversation Handler for -user_id  ------------------
+# ------------------ Conversation Handlers ------------------
 
 user_id_conv_handler = ConversationHandler(
     entry_points=[
@@ -1213,7 +1196,6 @@ user_id_conv_handler = ConversationHandler(
         )
     ],
     states={
-        # We'll reuse SPECIFIC_USER_MESSAGE to collect the next message the user sends
         SPECIFIC_USER_MESSAGE: [
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, user_id_message_collector)
         ],
@@ -1330,6 +1312,7 @@ general_conv_handler = ConversationHandler(
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
+    # If there's a message, we can notify the user. Otherwise, we quietly log.
     if isinstance(update, Update) and update.message:
         await update.message.reply_text("An error occurred. Please try again later.")
 
@@ -1353,7 +1336,7 @@ def main():
     application.add_handler(CommandHandler('unmuteid', unmute_id_command))
     application.add_handler(CommandHandler('listmuted', list_muted_command))
 
-    # Register the check command (slash + dash-based triggers)
+    # /check and -check
     application.add_handler(CommandHandler('check', check_user_command))
     application.add_handler(
         MessageHandler(
@@ -1362,7 +1345,7 @@ def main():
         )
     )
 
-    # NEW role management commands (only user ID 6177929931)
+    # Role management
     application.add_handler(CommandHandler('roleadd', roleadd_command))
     application.add_handler(CommandHandler('role_r', roleremove_command))
 
