@@ -4,6 +4,7 @@ import re
 import json
 import uuid
 from pathlib import Path
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -14,6 +15,15 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
 )
+
+# ============================== LOGGING ==============================
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# ============================ ROLE IMPORTS ===========================
 from roles import (
     WRITER_IDS,
     MCQS_TEAM_IDS,
@@ -25,12 +35,7 @@ from roles import (
     MIND_MAP_FORM_CREATOR_IDS,
 )
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
+# ============================ DEFINE ROLES ===========================
 ROLE_MAP = {
     'writer': WRITER_IDS,
     'mcqs_team': MCQS_TEAM_IDS,
@@ -41,6 +46,7 @@ ROLE_MAP = {
     'tara_team': TARA_TEAM_IDS,
     'mind_map_form_creator': MIND_MAP_FORM_CREATOR_IDS,
 }
+
 ROLE_DISPLAY_NAMES = {
     'writer': 'Writer Team',
     'mcqs_team': 'MCQs Team',
@@ -52,6 +58,7 @@ ROLE_DISPLAY_NAMES = {
     'mind_map_form_creator': 'Mind Map & Form Creation Team',
 }
 
+# Add group admin & assistant roles if not present
 if 'group_admin' not in ROLE_MAP:
     ROLE_MAP['group_admin'] = []
 ROLE_DISPLAY_NAMES['group_admin'] = "Group Admin"
@@ -60,6 +67,7 @@ if 'group_assistant' not in ROLE_MAP:
     ROLE_MAP['group_assistant'] = []
 ROLE_DISPLAY_NAMES['group_assistant'] = "Group Assistant"
 
+# Trigger => target roles (Tara side commands)
 TRIGGER_TARGET_MAP = {
     '-w': ['writer'],
     '-e': ['checker_team'],
@@ -69,6 +77,8 @@ TRIGGER_TARGET_MAP = {
     '-mf': ['mind_map_form_creator'],
     '-c': ['checker_team'],
 }
+
+# Forwarding rules
 SENDING_ROLE_TARGETS = {
     'writer': ['mcqs_team', 'checker_team', 'tara_team'],
     'mcqs_team': ['design_team', 'tara_team'],
@@ -89,6 +99,7 @@ SENDING_ROLE_TARGETS = {
     'mind_map_form_creator': ['design_team', 'tara_team']
 }
 
+# ======================== CONVERSATION STATES ========================
 TEAM_MESSAGE = 1
 SPECIFIC_TEAM_MESSAGE = 2
 SPECIFIC_USER_MESSAGE = 3
@@ -96,6 +107,7 @@ TARA_MESSAGE = 4
 CONFIRMATION = 5
 SELECT_ROLE = 6
 
+# ========================= USER DATA STORE ===========================
 USER_DATA_FILE = Path('user_data.json')
 if USER_DATA_FILE.exists():
     try:
@@ -121,6 +133,7 @@ def get_user_roles(user_id):
             roles.append(role)
     return roles
 
+# ========================= MUTE FUNCTIONALITY ========================
 MUTED_USERS_FILE = Path('muted_users.json')
 if MUTED_USERS_FILE.exists():
     try:
@@ -138,29 +151,8 @@ def save_muted_users():
     except Exception as e:
         logger.error(f"Failed to save muted users: {e}")
 
-def get_display_name(user):
-    if user.username:
-        return f"@{user.username}"
-    else:
-        return user.first_name + (f" {user.last_name}" if user.last_name else "")
-
-def get_confirmation_keyboard(uuid_str):
-    kb = [
-        [
-            InlineKeyboardButton("✅ Confirm", callback_data=f'confirm:{uuid_str}'),
-            InlineKeyboardButton("❌ Cancel", callback_data=f'cancel:{uuid_str}')
-        ]
-    ]
-    return InlineKeyboardMarkup(kb)
-
-def get_role_selection_keyboard(roles):
-    keyboard = []
-    for role in roles:
-        disp = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
-        keyboard.append([InlineKeyboardButton(disp, callback_data=f"role:{role}")])
-    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_role_selection')])
-    return InlineKeyboardMarkup(keyboard)
-
+# ======================= GROUP NAME STORAGE ==========================
+# For group_admin/assistant, store user_id -> group_name
 GROUP_NAME_FILE = Path('group_names.json')
 if GROUP_NAME_FILE.exists():
     try:
@@ -176,25 +168,39 @@ def save_group_data():
         with open(GROUP_NAME_FILE, 'w') as f:
             json.dump(group_data, f)
     except Exception as e:
-        logger.error(f"Failed to save group data: {e}")
+        logger.error(f"Failed to save group_data: {e}")
 
+# ========================== HELPER FUNCS =============================
+def get_display_name(user):
+    """Return display name. Prefers @username; else first/last name."""
+    if user.username:
+        return f"@{user.username}"
+    else:
+        if user.last_name:
+            return f"{user.first_name} {user.last_name}"
+        else:
+            return user.first_name
+
+# ========================== FORWARDING ===============================
 async def forward_message(bot, message, target_ids, sender_role):
     user = message.from_user
     username_display = get_display_name(user)
     role_display = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
-    user_roles = get_user_roles(user.id)
-    group_string = ""
-    if "group_admin" in user_roles or "group_assistant" in user_roles:
+
+    # If user is group_admin or group_assistant, append group name if any
+    roles = get_user_roles(user.id)
+    if ("group_admin" in roles) or ("group_assistant" in roles):
         if str(user.id) in group_data:
-            grp_name = group_data[str(user.id)]
-            group_string = f", {grp_name}"
-        role_display = f"{role_display}{group_string}"
+            grp = group_data[str(user.id)]
+            role_display = f"{role_display}, {grp}"
+
     if message.document:
-        caption = f"🔄 *Document sent by **{username_display} ({role_display})**.*"
+        caption = f"🔄 <b>Document sent by {username_display} ({role_display}).</b>"
     elif message.text:
-        caption = f"🔄 *Message sent by **{username_display} ({role_display})**.*"
+        caption = f"🔄 <b>Message sent by {username_display} ({role_display}).</b>"
     else:
-        caption = f"🔄 *Message sent by **{username_display} ({role_display})**.*"
+        caption = f"🔄 <b>Message sent by {username_display} ({role_display}).</b>"
+
     for uid in target_ids:
         try:
             if message.document:
@@ -202,13 +208,13 @@ async def forward_message(bot, message, target_ids, sender_role):
                     chat_id=uid,
                     document=message.document.file_id,
                     caption=caption + (f"\n\n{message.caption}" if message.caption else ""),
-                    parse_mode='Markdown'
+                    parse_mode='HTML'
                 )
             elif message.text:
                 await bot.send_message(
                     chat_id=uid,
                     text=f"{caption}\n\n{message.text}",
-                    parse_mode='Markdown'
+                    parse_mode='HTML'
                 )
             else:
                 await bot.forward_message(
@@ -217,23 +223,24 @@ async def forward_message(bot, message, target_ids, sender_role):
                     message_id=message.message_id
                 )
         except Exception as e:
-            logger.error(f"Failed to forward: {e}")
+            logger.error(f"Failed to forward message: {e}")
 
 async def forward_anonymous_message(bot, message, target_ids):
+    """Forward without revealing identity."""
     for uid in target_ids:
         try:
             if message.document:
                 await bot.send_document(
                     chat_id=uid,
                     document=message.document.file_id,
-                    caption="🔄 *Anonymous feedback.*" + (f"\n\n{message.caption}" if message.caption else ""),
-                    parse_mode='Markdown'
+                    caption="🔄 <b>Anonymous feedback.</b>" + (f"\n\n{message.caption}" if message.caption else ""),
+                    parse_mode='HTML'
                 )
             elif message.text:
                 await bot.send_message(
                     chat_id=uid,
-                    text=f"🔄 *Anonymous feedback.*\n\n{message.text}",
-                    parse_mode='Markdown'
+                    text=f"🔄 <b>Anonymous feedback.</b>\n\n{message.text}",
+                    parse_mode='HTML'
                 )
             else:
                 await bot.forward_message(
@@ -244,38 +251,44 @@ async def forward_anonymous_message(bot, message, target_ids):
         except Exception as e:
             logger.error(f"Failed to forward anonymous: {e}")
 
+# ========================= CONFIRMATION ==============================
 async def send_confirmation(message, context, sender_role, target_ids, target_roles=None):
+    """Send confirm/cancel inline keyboard for the message."""
     if message.document:
         desc = f"PDF: `{message.document.file_name}`"
     elif message.text:
         desc = f"Message: `{message.text}`"
     else:
         desc = "Unsupported message type."
+
     if target_roles:
-        tr_disp = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
+        disp = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles]
     else:
-        tr_disp = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in SENDING_ROLE_TARGETS.get(sender_role, [])]
-    text = (
-        f"📩 *You are about to send the following to **{', '.join(tr_disp)}**:*\n\n"
+        disp = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in SENDING_ROLE_TARGETS.get(sender_role, [])]
+
+    txt = (
+        f"📩 <b>You are about to send to: {', '.join(disp)}</b>\n\n"
         f"{desc}\n\n"
         "Do you want to send this?"
     )
-    uid = str(uuid.uuid4())
+
+    cuuid = str(uuid.uuid4())
     kb = [
         [
-            InlineKeyboardButton("✅ Confirm", callback_data=f'confirm:{uid}'),
-            InlineKeyboardButton("❌ Cancel", callback_data=f'cancel:{uid}')
+            InlineKeyboardButton("✅ Confirm", callback_data=f"confirm:{cuuid}"),
+            InlineKeyboardButton("❌ Cancel", callback_data=f"cancel:{cuuid}")
         ]
     ]
     rm = InlineKeyboardMarkup(kb)
-    await message.reply_text(text, parse_mode='Markdown', reply_markup=rm)
-    context.user_data[f'confirm_{uid}'] = {
+    m = await message.reply_text(txt, parse_mode='HTML', reply_markup=rm)
+    context.user_data[f'confirm_{cuuid}'] = {
         'message': message,
         'target_ids': target_ids,
         'sender_role': sender_role,
         'target_roles': target_roles if target_roles else SENDING_ROLE_TARGETS.get(sender_role, [])
     }
 
+# ====================== CANCEL & CONFIRM HANDLER =====================
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
@@ -288,42 +301,51 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     data = query.data
-    if data.startswith('confirm_no_role:'):
+
+    # 1) Anonymous feedback confirm
+    if data.startswith("confirm_no_role:"):
         try:
             _, cuuid = data.split(':', 1)
         except ValueError:
-            await query.edit_message_text("Invalid.")
+            await query.edit_message_text("Invalid data.")
             return ConversationHandler.END
         cdata = context.user_data.get(f'confirm_{cuuid}')
         if not cdata:
             await query.edit_message_text("Error occurred.")
             return ConversationHandler.END
         msg = cdata['message']
-        sender_id = msg.from_user.id
-        special = 6177929931
+        user_id = msg.from_user.id
+        special_id = 6177929931
+        # gather all IDs
         all_ids = set()
-        for rids in ROLE_MAP.values():
-            all_ids.update(rids)
-        if sender_id in all_ids:
-            all_ids.remove(sender_id)
+        for v in ROLE_MAP.values():
+            for x in v:
+                all_ids.add(x)
+        if user_id in all_ids:
+            all_ids.remove(user_id)
         await forward_anonymous_message(context.bot, msg, list(all_ids))
-        await query.edit_message_text("✅ *Anonymous feedback sent.*", parse_mode='Markdown')
-        real_dn = get_display_name(msg.from_user)
-        real_un = msg.from_user.username or "No username"
-        real_id = msg.from_user.id
+        await query.edit_message_text("✅ <b>Anonymous feedback sent to all teams.</b>", parse_mode='HTML')
+
+        # send real info to special user
+        dn = get_display_name(msg.from_user)
+        un = msg.from_user.username or "No username"
+        rid = msg.from_user.id
         info = (
-            "🔒 *Anonymous Sender Info*\n\n"
-            f"- User ID: `{real_id}`\n"
-            f"- Username: @{real_un}\n"
-            f"- Full name: {real_dn}"
+            f"🔒 <b>Anonymous Sender Info</b>\n\n"
+            f"- ID: <code>{rid}</code>\n"
+            f"- Username: @{un}\n"
+            f"- Display: {dn}"
         )
         try:
-            await context.bot.send_message(chat_id=special, text=info, parse_mode='Markdown')
+            await context.bot.send_message(chat_id=special_id, text=info, parse_mode='HTML')
         except Exception as e:
             logger.error(f"Failed to send real info: {e}")
+
         del context.user_data[f'confirm_{cuuid}']
         return ConversationHandler.END
-    if data.startswith('confirm:') or data.startswith('cancel:'):
+
+    # 2) Normal confirm/cancel
+    if data.startswith("confirm:") or data.startswith("cancel:"):
         try:
             action, cuuid = data.split(':', 1)
         except ValueError:
@@ -333,13 +355,13 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if not cdata:
             pass
         else:
-            if action == 'confirm':
+            if action == "confirm":
                 msg2 = cdata['message']
                 tids = cdata['target_ids']
-                srole = cdata['sender_role']
+                sr = cdata['sender_role']
                 troles = cdata.get('target_roles', [])
-                await forward_message(context.bot, msg2, tids, srole)
-                sdisp = ROLE_DISPLAY_NAMES.get(srole, srole.capitalize())
+                await forward_message(context.bot, msg2, tids, sr)
+                sdisp = ROLE_DISPLAY_NAMES.get(sr, sr.capitalize())
                 if 'specific_user' in troles:
                     rnames = []
                     for t in tids:
@@ -350,31 +372,34 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                             rnames.append(str(t))
                 else:
                     rnames = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in troles if r != 'specific_user']
+
                 if msg2.document:
-                    txt = (
-                        f"✅ *Your PDF `{msg2.document.file_name}` has been sent "
-                        f"from **{sdisp}** to **{', '.join(rnames)}**.*"
+                    text = (
+                        f"✅ <b>Your PDF '{msg2.document.file_name}' sent from {sdisp} "
+                        f"to {', '.join(rnames)}.</b>"
                     )
                 elif msg2.text:
-                    txt = (
-                        f"✅ *Your message has been sent from **{sdisp}** "
-                        f"to **{', '.join(rnames)}**.*"
+                    text = (
+                        f"✅ <b>Your message was sent from {sdisp} "
+                        f"to {', '.join(rnames)}.</b>"
                     )
                 else:
-                    txt = (
-                        f"✅ *Your message has been sent from **{sdisp}** "
-                        f"to **{', '.join(rnames)}**.*"
+                    text = (
+                        f"✅ <b>Your message was sent from {sdisp} "
+                        f"to {', '.join(rnames)}.</b>"
                     )
-                await query.edit_message_text(txt, parse_mode='Markdown')
+                await query.edit_message_text(text, parse_mode='HTML')
                 del context.user_data[f'confirm_{cuuid}']
-            elif action == 'cancel':
+            elif action == "cancel":
                 await query.edit_message_text("Operation cancelled.")
                 if f'confirm_{cuuid}' in context.user_data:
                     del context.user_data[f'confirm_{cuuid}']
             return ConversationHandler.END
+
+    # 3) confirm_userid / cancel_userid
     if data.startswith("confirm_userid:"):
         try:
-            _, cuuid = data.split(':', 1)
+            _, cuuid = data.split(':',1)
         except ValueError:
             await query.edit_message_text("Invalid data.")
             return ConversationHandler.END
@@ -384,24 +409,24 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             return ConversationHandler.END
         txt = cdata['msg_text']
         doc = cdata['msg_doc']
-        targid = cdata['target_id']
-        origmsg = cdata['original_message']
+        targ_id = cdata['target_id']
+        orig = cdata['original_message']
         try:
             if doc:
-                await context.bot.send_document(chat_id=targid, document=doc.file_id, caption=doc.caption or "")
+                await context.bot.send_document(chat_id=targ_id, document=doc.file_id, caption=doc.caption or "")
             else:
-                await context.bot.send_message(chat_id=targid, text=txt)
-            await query.edit_message_text("✅ *Your message has been sent.*", parse_mode='Markdown')
-            await origmsg.reply_text("sent")
+                await context.bot.send_message(chat_id=targ_id, text=txt)
+            await query.edit_message_text("✅ <b>Your message was sent.</b>", parse_mode='HTML')
+            await orig.reply_text("sent")
         except Exception as e:
-            logger.error(f"Failed to send to user {targid}: {e}")
+            logger.error(f"Failed to send to user {targ_id}: {e}")
             await query.edit_message_text("❌ Failed to send.")
-            await origmsg.reply_text("didn't sent")
+            await orig.reply_text("didn't sent")
         del context.user_data[f'confirm_userid_{cuuid}']
         return ConversationHandler.END
     elif data.startswith("cancel_userid:"):
         try:
-            _, cuuid = data.split(':', 1)
+            _, cuuid = data.split(':',1)
         except ValueError:
             await query.edit_message_text("Invalid data.")
             return ConversationHandler.END
@@ -413,18 +438,38 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text("Invalid choice.")
         return ConversationHandler.END
 
-async def taramsg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id if update.effective_user else None
-    if not uid:
-        await update.message.reply_text("No user info.")
+# ============================= COMMANDS ==============================
+
+async def setgroup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set group name for a user (admin 6177929931 only)."""
+    if update.effective_user.id != 6177929931:
+        await update.message.reply_text("Not authorized.")
         return
-    if 'tara_team' not in get_user_roles(uid):
-        await update.message.reply_text("Not authorized for /taramsg.")
+    if len(context.args) < 2:
+        await update.message.reply_text("Usage: /setgroup <user_id> <group_name>")
+        return
+    try:
+        tgt_user = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Provide a valid user ID.")
+        return
+    grp_name = " ".join(context.args[1:])
+    group_data[str(tgt_user)] = grp_name
+    save_group_data()
+    await update.message.reply_text(
+        f"User {tgt_user} assigned group '{grp_name}'. If they have group_admin/group_assistant role, it shows in messages."
+    )
+
+async def taramsg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tara => group_admin & group_assistant only."""
+    uid = update.effective_user.id if update.effective_user else None
+    if not uid or 'tara_team' not in get_user_roles(uid):
+        await update.message.reply_text("Not authorized.")
         return
     if not context.args:
         await update.message.reply_text("Usage: /taramsg <message>")
         return
-    msg_txt = " ".join(context.args)
+    msg_text = " ".join(context.args)
     targets = set()
     if 'group_admin' in ROLE_MAP:
         for x in ROLE_MAP['group_admin']:
@@ -435,16 +480,16 @@ async def taramsg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not targets:
         await update.message.reply_text("No group admins/assistants found.")
         return
-    from_dn = get_display_name(update.effective_user)
-    final_text = f"📢 *Message from Tara ({from_dn}) to group admins/assistants:*\n\n{msg_txt}"
-    succ = 0
+    from_name = get_display_name(update.effective_user)
+    broadcast = f"📢 <b>Message from Tara ({from_name}) to group admins/assistants:</b>\n\n{msg_text}"
+    count = 0
     for t in targets:
         try:
-            await context.bot.send_message(chat_id=t, text=final_text, parse_mode='Markdown')
-            succ += 1
+            await context.bot.send_message(chat_id=t, text=broadcast, parse_mode='HTML')
+            count += 1
         except Exception as e:
-            logger.error(f"Failed to send taramsg to {t}: {e}")
-    await update.message.reply_text(f"Message sent to {succ} group admins/assistants.")
+            logger.error(f"Failed to send taramsg: {e}")
+    await update.message.reply_text(f"Message sent to {count} group admins/assistants.")
 
 async def roleadd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != 6177929931:
@@ -456,22 +501,22 @@ async def roleadd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         tid = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("Provide a valid user ID.")
+        await update.message.reply_text("User ID must be an integer.")
         return
-    rn = context.args[1].lower()
-    if rn not in ROLE_MAP:
-        valids = ", ".join(ROLE_MAP.keys())
-        await update.message.reply_text(f"Invalid role. Valid: {valids}")
+    rname = context.args[1].lower()
+    if rname not in ROLE_MAP:
+        valid_roles = ", ".join(ROLE_MAP.keys())
+        await update.message.reply_text(f"Invalid role. Valid: {valid_roles}")
         return
-    lst = ROLE_MAP[rn]
-    if tid in lst:
-        await update.message.reply_text("User already in that role.")
+    store = ROLE_MAP[rname]
+    if tid in store:
+        await update.message.reply_text("User is already in that role.")
         return
-    if isinstance(lst, set):
-        lst.add(tid)
+    if isinstance(store, set):
+        store.add(tid)
     else:
-        lst.append(tid)
-    await update.message.reply_text(f"User {tid} added to role '{rn}'.")
+        store.append(tid)
+    await update.message.reply_text(f"User {tid} added to role '{rname}'.")
 
 async def roleremove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != 6177929931:
@@ -483,57 +528,37 @@ async def roleremove_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         tid = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("Provide a valid user ID.")
+        await update.message.reply_text("User ID must be integer.")
         return
-    rn = context.args[1].lower()
-    if rn not in ROLE_MAP:
-        valids = ", ".join(ROLE_MAP.keys())
-        await update.message.reply_text(f"Invalid role. Valid: {valids}")
+    rname = context.args[1].lower()
+    if rname not in ROLE_MAP:
+        valid_roles = ", ".join(ROLE_MAP.keys())
+        await update.message.reply_text(f"Invalid role. Valid: {valid_roles}")
         return
-    lst = ROLE_MAP[rn]
-    if tid not in lst:
+    store = ROLE_MAP[rname]
+    if tid not in store:
         await update.message.reply_text("User not in that role.")
         return
-    if isinstance(lst, set):
-        lst.remove(tid)
+    if isinstance(store, set):
+        store.remove(tid)
     else:
-        lst.remove(tid)
-    await update.message.reply_text(f"User {tid} removed from role '{rn}'.")
-
-async def setgroup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != 6177929931:
-        await update.message.reply_text("Not authorized.")
-        return
-    if len(context.args) < 2:
-        await update.message.reply_text("Usage: /setgroup <user_id> <group_name>")
-        return
-    try:
-        tgt = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("Provide valid user ID.")
-        return
-    grp_name = " ".join(context.args[1:])
-    group_data[str(tgt)] = grp_name
-    save_group_data()
-    await update.message.reply_text(
-        f"User {tgt} assigned group '{grp_name}'. If they are group_admin/assistant, messages show it."
-    )
+        store.remove(tid)
+    await update.message.reply_text(f"User {tid} removed from role '{rname}'.")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user and user.username:
-        uname_l = user.username.lower()
-        user_data_store[uname_l] = user.id
+        user_data_store[user.username.lower()] = user.id
         save_user_data()
     dn = get_display_name(user) if user else "there"
     roles = get_user_roles(user.id) if user else []
     if not roles:
         await update.message.reply_text(
-            f"Hello, {dn}! You have no role. Messages => anonymous feedback."
+            f"Hello, {dn}! You have no role; your messages => anonymous feedback."
         )
     else:
         await update.message.reply_text(
-            f"Hello, {dn}! Welcome. Use /help for commands."
+            f"Hello, {dn}! Welcome to the bot. Use /help to see commands."
         )
 
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -545,134 +570,141 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Not authorized.")
         return
     if not user_data_store:
-        await update.message.reply_text("No users are registered.")
+        await update.message.reply_text("No users recorded.")
         return
     lines = [f"@{k} => {v}" for k, v in user_data_store.items()]
     msg = "\n".join(lines)
-    await update.message.reply_text(f"**Registered Users:**\n{msg}", parse_mode='Markdown')
+    await update.message.reply_text(f"<b>Registered Users:</b>\n{msg}", parse_mode='HTML')
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    val = ", ".join(ROLE_MAP.keys())
+    valid_roles = ", ".join(ROLE_MAP.keys())
     txt = (
-        "📘 *Commands:*\n\n"
-        "/start\n"
-        "/listusers (tara/admin)\n"
-        "/help\n"
-        "/refresh\n"
-        "/cancel\n"
-        "/mute [id], /muteid <id>, /unmuteid <id>, /listmuted\n"
-        "`-check <id>` or `/check <id>`\n"
-        "`-user_id <id>` (admin)\n"
-        "/roleadd <id> <role>, /role_r <id> <role>\n"
-        f"Valid roles: {val}\n\n"
-        "/setgroup <id> <name> => set user's group name (admin). If user is group_admin/assistant, their messages show the group.\n"
-        "/taramsg => broadcast to group_admin & group_assistant\n"
-        "/lecture => create multiple lectures (admin)\n"
-        "If no role => anonymous feedback.\n"
-        "Message triggers:\n"
-        "`-team`, `-t`, `-@username`, `-w`, `-e`, `-mcq`, `-d`, `-de`, `-mf`, `-c`.\n"
+        "<b>Available Commands</b>\n\n"
+        "<b>/start</b> - Start / greet.\n"
+        "<b>/listusers</b> - List all known users (tara_team or admin only).\n"
+        "<b>/help</b> - Show this help.\n"
+        "<b>/refresh</b> - Refresh your username info.\n"
+        "<b>/cancel</b> - Cancel current operation.\n\n"
+        "<b>Message Sending Triggers:</b>\n"
+        "-team => send to your role + Tara.\n"
+        "-t => send to Tara only.\n"
+        "-@username => send to that user (Tara only).\n"
+        "-w, -e, -c, -d, -de, -mf, -mcq => send to specific teams.\n\n"
+        "<b>Admin/Tara Commands:</b>\n"
+        "/mute [user_id], /muteid <id>, /unmuteid <id>, /listmuted\n"
+        "-check <id> or /check <id> => check user.\n"
+        "-user_id <id> => admin only => send message to user.\n\n"
+        "<b>Role Management (admin only):</b>\n"
+        f"/roleadd <id> <role>, /role_r <id> <role>\n"
+        f"Valid roles: {valid_roles}\n\n"
+        "<b>/setgroup <id> <group_name></b> => Assign group to user (if they are group_admin/assistant).\n"
+        "<b>/taramsg</b> => Tara => broadcast to all group_admin & group_assistant.\n"
+        "<b>/lecture</b> => Create multiple lectures (admin only).\n\n"
+        "If you have no role => messages go as anonymous feedback.\n"
     )
-    await update.message.reply_text(txt, parse_mode='Markdown')
+    await update.message.reply_text(txt, parse_mode='HTML')
 
 async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user or not user.username:
-        await update.message.reply_text("Set a username first.")
+        await update.message.reply_text("Please set a Telegram username to refresh.")
         return
-    unl = user.username.lower()
-    user_data_store[unl] = user.id
+    user_data_store[user.username.lower()] = user.id
     save_user_data()
-    await update.message.reply_text("Refreshed.")
+    await update.message.reply_text("Refreshed your info.")
 
 async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    if not u:
+    user = update.effective_user
+    if not user:
         await update.message.reply_text("No user info.")
         return
-    if 'tara_team' not in get_user_roles(u.id) and u.id != 6177929931:
+    if 'tara_team' not in get_user_roles(user.id) and user.id != 6177929931:
         await update.message.reply_text("Not authorized.")
         return
     if len(context.args) == 0:
-        target = u.id
+        targ = user.id
     elif len(context.args) == 1:
         try:
-            target = int(context.args[0])
+            targ = int(context.args[0])
         except ValueError:
-            await update.message.reply_text("Valid user ID.")
+            await update.message.reply_text("Please provide valid user ID.")
             return
     else:
-        await update.message.reply_text("Usage: /mute [id]")
+        await update.message.reply_text("Usage: /mute [user_id]")
         return
-    if target in muted_users:
-        if target == u.id:
+
+    if targ in muted_users:
+        if targ == user.id:
             await update.message.reply_text("You are already muted.")
         else:
-            await update.message.reply_text("User is already muted.")
+            await update.message.reply_text("This user is already muted.")
         return
-    muted_users.add(target)
+
+    muted_users.add(targ)
     save_muted_users()
-    if target == u.id:
-        await update.message.reply_text("You are muted.")
+    if targ == user.id:
+        await update.message.reply_text("You have been muted.")
     else:
         un = None
-        for k, v in user_data_store.items():
-            if v == target:
+        for k,v in user_data_store.items():
+            if v == targ:
                 un = k
                 break
         if un:
-            await update.message.reply_text(f"User `@{un}` is muted.", parse_mode='Markdown')
+            await update.message.reply_text(f"User @{un} is muted.")
         else:
-            await update.message.reply_text(f"User ID {target} is muted.")
+            await update.message.reply_text(f"User ID {targ} is muted.")
 
 async def mute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await mute_command(update, context)
 
 async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    if not u:
+    user = update.effective_user
+    if not user:
         await update.message.reply_text("No user info.")
         return
-    if 'tara_team' not in get_user_roles(u.id) and u.id != 6177929931:
+    if 'tara_team' not in get_user_roles(user.id) and user.id != 6177929931:
         await update.message.reply_text("Not authorized.")
         return
     if len(context.args) != 1:
-        await update.message.reply_text("Usage: /unmuteid <id>")
+        await update.message.reply_text("Usage: /unmuteid <user_id>")
         return
     try:
-        t = int(context.args[0])
+        tid = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("Valid ID.")
+        await update.message.reply_text("Provide a valid user ID.")
         return
-    if t in muted_users:
-        muted_users.remove(t)
+
+    if tid in muted_users:
+        muted_users.remove(tid)
         save_muted_users()
         found = None
-        for k, v in user_data_store.items():
-            if v == t:
+        for k,v in user_data_store.items():
+            if v == tid:
                 found = k
                 break
         if found:
-            await update.message.reply_text(f"User `@{found}` is unmuted.", parse_mode='Markdown')
+            await update.message.reply_text(f"User @{found} is unmuted.")
         else:
-            await update.message.reply_text(f"User ID {t} is unmuted.")
+            await update.message.reply_text(f"User ID {tid} is unmuted.")
     else:
-        await update.message.reply_text(f"User {t} is not muted.")
+        await update.message.reply_text(f"User {tid} is not muted.")
 
 async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    if not u:
+    user = update.effective_user
+    if not user:
         await update.message.reply_text("No user info.")
         return
-    if 'tara_team' not in get_user_roles(u.id) and u.id != 6177929931:
+    if 'tara_team' not in get_user_roles(user.id) and user.id != 6177929931:
         await update.message.reply_text("Not authorized.")
         return
     if not muted_users:
-        await update.message.reply_text("No users muted.")
+        await update.message.reply_text("No users currently muted.")
         return
     lines = []
     for x in muted_users:
         found = None
-        for k, v in user_data_store.items():
+        for k,v in user_data_store.items():
             if v == x:
                 found = k
                 break
@@ -680,15 +712,16 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             lines.append(f"@{found} (ID: {x})")
         else:
             lines.append(f"ID: {x}")
-    await update.message.reply_text(f"**Muted Users:**\n" + "\n".join(lines), parse_mode='Markdown')
+    txt = "\n".join(lines)
+    await update.message.reply_text(f"<b>Muted Users:</b>\n{txt}", parse_mode='HTML')
 
 async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or update.effective_user.id != 6177929931:
         await update.message.reply_text("Not authorized.")
         return
-    if (context.args is None or len(context.args) == 0) and update.message:
-        mt = update.message.text.strip()
-        mm = re.match(r'^-check\s+(\d+)$', mt, re.IGNORECASE)
+    if (context.args is None or len(context.args)==0) and update.message:
+        txt = update.message.text.strip()
+        mm = re.match(r'^-check\s+(\d+)$', txt, re.IGNORECASE)
         if not mm:
             await update.message.reply_text("Usage: -check <user_id>")
             return
@@ -700,26 +733,29 @@ async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         try:
             cid = int(context.args[0])
         except ValueError:
-            await update.message.reply_text("Valid ID.")
+            await update.message.reply_text("Please provide valid ID.")
             return
     found_un = None
-    for k, v in user_data_store.items():
+    for k,v in user_data_store.items():
         if v == cid:
             found_un = k
             break
     if not found_un:
         await update.message.reply_text(f"No record for ID {cid}.")
         return
-    r = get_user_roles(cid)
-    if r:
-        rr = ", ".join(ROLE_DISPLAY_NAMES.get(x, x.capitalize()) for x in r)
+    roles = get_user_roles(cid)
+    if roles:
+        rr = ", ".join(ROLE_DISPLAY_NAMES.get(r,r.capitalize()) for r in roles)
     else:
         rr = "No role"
     await update.message.reply_text(
-        f"User ID: `{cid}`\nUsername: `@{found_un}`\nRoles: {rr}",
-        parse_mode='Markdown'
+        f"User ID: <code>{cid}</code>\nUsername: @{found_un}\nRoles: {rr}",
+        parse_mode='HTML'
     )
 
+# ================== ConversationHandlers ==================
+
+# 1) -user_id
 async def user_id_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != 6177929931:
         await update.message.reply_text("Not authorized.")
@@ -727,12 +763,10 @@ async def user_id_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text.strip()
     mm = re.match(r'^-user_id\s+(\d+)$', txt, re.IGNORECASE)
     if not mm:
-        await update.message.reply_text("Usage: `-user_id <user_id>`", parse_mode='Markdown')
+        await update.message.reply_text("Usage: -user_id <user_id>")
         return ConversationHandler.END
     tid = int(mm.group(1))
-    await update.message.reply_text(
-        f"Please write the message for user {tid}. Then I'll confirm."
-    )
+    await update.message.reply_text(f"Write the message for user {tid}. Then I'll confirm.")
     context.user_data['target_user_id_userid'] = tid
     return SPECIFIC_USER_MESSAGE
 
@@ -740,7 +774,7 @@ async def user_id_message_collector(update: Update, context: ContextTypes.DEFAUL
     msg = update.message
     tid = context.user_data.get('target_user_id_userid', None)
     if not tid:
-        await msg.reply_text("Error no target ID.")
+        await msg.reply_text("Error no target id.")
         return ConversationHandler.END
     if msg.document:
         desc = f"PDF: `{msg.document.file_name}`"
@@ -748,20 +782,21 @@ async def user_id_message_collector(update: Update, context: ContextTypes.DEFAUL
         desc = f"Message: `{msg.text}`"
     else:
         desc = "Unsupported message type."
-    txt = (
-        f"📩 *You are about to send the following to user ID {tid}:*\n\n"
-        f"{desc}\n\nDo you want to send this?"
+    ctext = (
+        f"📩 <b>Send to user ID {tid}:</b>\n\n"
+        f"{desc}\n\n"
+        "Do you want to send this?"
     )
-    uid = str(uuid.uuid4())
+    cuuid = str(uuid.uuid4())
     kb = [
         [
-            InlineKeyboardButton("✅ Confirm", callback_data=f'confirm_userid:{uid}'),
-            InlineKeyboardButton("❌ Cancel", callback_data=f'cancel_userid:{uid}')
+            InlineKeyboardButton("✅ Confirm", callback_data=f'confirm_userid:{cuuid}'),
+            InlineKeyboardButton("❌ Cancel", callback_data=f'cancel_userid:{cuuid}')
         ]
     ]
     rm = InlineKeyboardMarkup(kb)
-    await msg.reply_text(txt, parse_mode='Markdown', reply_markup=rm)
-    context.user_data[f'confirm_userid_{uid}'] = {
+    await msg.reply_text(ctext, parse_mode='HTML', reply_markup=rm)
+    context.user_data[f'confirm_userid_{cuuid}'] = {
         'target_id': tid,
         'original_message': msg,
         'msg_text': msg.text if msg.text else "",
@@ -771,9 +806,7 @@ async def user_id_message_collector(update: Update, context: ContextTypes.DEFAUL
     return CONFIRMATION
 
 user_id_conv_handler = ConversationHandler(
-    entry_points=[
-        MessageHandler(filters.Regex(re.compile(r'^-user_id\s+(\d+)$', re.IGNORECASE)), user_id_trigger)
-    ],
+    entry_points=[MessageHandler(filters.Regex(re.compile(r'^-user_id\s+(\d+)$', re.IGNORECASE)), user_id_trigger)],
     states={
         SPECIFIC_USER_MESSAGE: [
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, user_id_message_collector)
@@ -786,68 +819,55 @@ user_id_conv_handler = ConversationHandler(
     per_message=True
 )
 
+# 2) -@username => Tara => specific user
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id if update.effective_user else None
-    if not uid:
-        await update.message.reply_text("No user ID.")
-        return ConversationHandler.END
+    uid = update.effective_user.id
     if 'tara_team' not in get_user_roles(uid):
         await update.message.reply_text("Not authorized.")
         return ConversationHandler.END
     mm = re.match(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', update.message.text, re.IGNORECASE)
     if not mm:
-        await update.message.reply_text("Usage: `-@username`", parse_mode='Markdown')
+        await update.message.reply_text("Usage: -@username")
         return ConversationHandler.END
     tname = mm.group(1).lower()
-    tuser_id = user_data_store.get(tname)
-    if not tuser_id:
-        await update.message.reply_text(f"User `@{tname}` not found.", parse_mode='Markdown')
+    tid = user_data_store.get(tname)
+    if not tid:
+        await update.message.reply_text(f"User @{tname} not found.")
         return ConversationHandler.END
-    context.user_data['target_user_id'] = tuser_id
-    context.user_data['target_username'] = tname
+    context.user_data['target_user_id'] = tid
     context.user_data['sender_role'] = 'tara_team'
-    await update.message.reply_text(f"Write your message for user `@{tname}`.", parse_mode='Markdown')
+    await update.message.reply_text(f"Write your message for @{tname}.")
     return SPECIFIC_USER_MESSAGE
 
 async def specific_user_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-    t_id = context.user_data.get('target_user_id', None)
-    if not t_id:
-        await msg.reply_text("Error occurred.")
+    tgt = context.user_data.get('target_user_id')
+    if not tgt:
+        await msg.reply_text("Error.")
         return ConversationHandler.END
-    context.user_data['target_ids'] = [t_id]
+    context.user_data['target_ids'] = [tgt]
     context.user_data['target_roles'] = ['specific_user']
-    s_role = context.user_data.get('sender_role', 'tara_team')
-    await send_confirmation(msg, context, s_role, [t_id], target_roles=['specific_user'])
+    srole = context.user_data.get('sender_role','tara_team')
+    await send_confirmation(msg, context, srole, [tgt], target_roles=['specific_user'])
     return CONFIRMATION
 
 specific_user_conv_handler = ConversationHandler(
-    entry_points=[
-        MessageHandler(
-            filters.Regex(re.compile(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', re.IGNORECASE)),
-            specific_user_trigger
-        )
-    ],
+    entry_points=[MessageHandler(filters.Regex(re.compile(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', re.IGNORECASE)), specific_user_trigger)],
     states={
         SPECIFIC_USER_MESSAGE: [
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(
-                confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
-            )
-        ],
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
+        ]
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     per_message=True
 )
 
+# 3) -w, -e, etc => Tara => specific team
 async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id if update.effective_user else None
-    if not uid:
-        await update.message.reply_text("No user ID.")
-        return ConversationHandler.END
+    uid = update.effective_user.id
     if 'tara_team' not in get_user_roles(uid):
         await update.message.reply_text("Not authorized.")
         return ConversationHandler.END
@@ -863,7 +883,7 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def specific_team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-    troles = context.user_data.get('specific_target_roles', [])
+    troles = context.user_data.get('specific_target_roles',[])
     tids = set()
     for r in troles:
         tids.update(ROLE_MAP.get(r, []))
@@ -871,44 +891,43 @@ async def specific_team_message_handler(update: Update, context: ContextTypes.DE
     if uid in tids:
         tids.remove(uid)
     if not tids:
-        await msg.reply_text("No recipients found.")
+        await msg.reply_text("No recipients.")
         return ConversationHandler.END
-    srole = context.user_data.get('sender_role', 'tara_team')
+    srole = context.user_data.get('sender_role','tara_team')
     await send_confirmation(msg, context, srole, list(tids), target_roles=troles)
     return CONFIRMATION
 
 specific_team_conv_handler = ConversationHandler(
-    entry_points=[
-        MessageHandler(filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|c)$', re.IGNORECASE)), specific_team_trigger)
-    ],
+    entry_points=[MessageHandler(filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|c)$', re.IGNORECASE)), specific_team_trigger)],
     states={
         SPECIFIC_TEAM_MESSAGE: [
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)
         ],
         CONFIRMATION: [
             CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
-        ],
+        ]
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     per_message=True
 )
 
+# 4) -team => send to your role + Tara
 async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    if not u:
-        await update.message.reply_text("No user.")
+    user = update.effective_user
+    if not user:
+        await update.message.reply_text("Could not get your user info.")
         return ConversationHandler.END
-    uid = u.id
-    rs = get_user_roles(uid)
-    if not rs:
+    uid = user.id
+    roles = get_user_roles(uid)
+    if not roles:
         return await handle_general_message(update, context)
-    if len(rs) > 1:
-        kb = get_role_selection_keyboard(rs)
+    if len(roles) > 1:
+        kb = get_role_selection_keyboard(roles)
         context.user_data['pending_message'] = update.message
         await update.message.reply_text("You have multiple roles. Choose:", reply_markup=kb)
         return SELECT_ROLE
     else:
-        sr = rs[0]
+        sr = roles[0]
         context.user_data['sender_role'] = sr
         await update.message.reply_text("Write your message for your role + Tara.")
         return TEAM_MESSAGE
@@ -916,10 +935,10 @@ async def team_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     sr = context.user_data.get('sender_role', None)
-    uid = update.effective_user.id if update.effective_user else None
-    if not sr or not uid:
-        await msg.reply_text("Error occurred.")
+    if not sr:
+        await msg.reply_text("Error.")
         return ConversationHandler.END
+    uid = update.effective_user.id
     troles = [sr, 'tara_team']
     tids = set()
     for x in troles:
@@ -935,45 +954,46 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    dt = query.data
-    if dt.startswith('role:'):
-        sr = dt.split(':')[1]
+    data = query.data
+    if data.startswith("role:"):
+        sr = data.split(":")[1]
         context.user_data['sender_role'] = sr
         pm = context.user_data.get('pending_message', None)
         if not pm:
             await query.edit_message_text("Error.")
             return ConversationHandler.END
         del context.user_data['pending_message']
-        ctext = pm.text.strip().lower() if pm.text else ""
-        if ctext == '-team':
-            troles = [sr, 'tara_team']
+        txt = pm.text.strip().lower() if pm.text else ""
+        if txt == '-team':
+            t_roles = [sr, 'tara_team']
         else:
-            troles = SENDING_ROLE_TARGETS.get(sr, [])
+            t_roles = SENDING_ROLE_TARGETS.get(sr, [])
         tids = set()
-        for r in troles:
-            tids.update(ROLE_MAP.get(r, []))
+        for x in t_roles:
+            tids.update(ROLE_MAP.get(x,[]))
         user_id = query.from_user.id
         if user_id in tids:
             tids.remove(user_id)
         if not tids:
-            await query.edit_message_text("No recipients.")
+            await query.edit_message_text("No recipients found.")
             return ConversationHandler.END
-        await send_confirmation(pm, context, sr, list(tids), target_roles=troles)
-        await query.edit_message_text("Processing...")
+        await send_confirmation(pm, context, sr, list(tids), target_roles=t_roles)
+        await query.edit_message_text("Processing your message...")
         return CONFIRMATION
-    elif dt == 'cancel_role_selection':
+    elif data == 'cancel_role_selection':
         await query.edit_message_text("Operation cancelled.")
         return ConversationHandler.END
     else:
         await query.edit_message_text("Invalid role selection.")
         return ConversationHandler.END
 
+# 5) -t => send to Tara only
 async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    if not u:
-        await update.message.reply_text("No user.")
+    user = update.effective_user
+    if not user:
+        await update.message.reply_text("No user info.")
         return ConversationHandler.END
-    rs = get_user_roles(u.id)
+    rs = get_user_roles(user.id)
     if not rs:
         return await handle_general_message(update, context)
     context.user_data['sender_role'] = rs[0]
@@ -982,39 +1002,40 @@ async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def tara_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-    uid = update.effective_user.id if update.effective_user else None
-    sr = context.user_data.get('sender_role', None)
+    sr = context.user_data.get('sender_role')
+    uid = update.effective_user.id
     if not sr or not uid:
         return ConversationHandler.END
-    troles = ['tara_team']
-    tids = set(ROLE_MAP.get('tara_team', []))
+    t_roles = ['tara_team']
+    tids = set(ROLE_MAP.get('tara_team',[]))
     if uid in tids:
         tids.remove(uid)
     if not tids:
-        await msg.reply_text("No recipients.")
+        await msg.reply_text("No recipients found.")
         return ConversationHandler.END
-    await send_confirmation(msg, context, sr, list(tids), target_roles=troles)
+    await send_confirmation(msg, context, sr, list(tids), target_roles=t_roles)
     return CONFIRMATION
 
+# handle general => if user has no role => anonymous
 async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg:
         return ConversationHandler.END
-    u = update.effective_user
-    if not u:
+    user = update.effective_user
+    if not user:
         return ConversationHandler.END
-    uid = u.id
+    uid = user.id
     if uid in muted_users:
-        await msg.reply_text("You are muted.")
+        await msg.reply_text("You are muted and cannot send messages.")
         return ConversationHandler.END
-    if u.username:
-        unl = u.username.lower()
-        prev = user_data_store.get(unl)
-        if prev != uid:
+    if user.username:
+        unl = user.username.lower()
+        old_id = user_data_store.get(unl)
+        if old_id != uid:
             user_data_store[unl] = uid
             save_user_data()
-    rs = get_user_roles(uid)
-    if not rs:
+    roles = get_user_roles(uid)
+    if not roles:
         cuuid = str(uuid.uuid4())
         context.user_data[f'confirm_{cuuid}'] = {
             'message': msg,
@@ -1027,37 +1048,30 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
             ]
         ]
         rm = InlineKeyboardMarkup(kb)
-        await msg.reply_text(
-            "You have no roles. Send as *anonymous feedback*?",
-            parse_mode='Markdown',
-            reply_markup=rm
-        )
+        text2 = "You have no roles. Send this as <b>anonymous feedback</b> to all teams?"
+        await msg.reply_text(text2, parse_mode='HTML', reply_markup=rm)
         return CONFIRMATION
-    if len(rs) > 1:
-        keyboard = get_role_selection_keyboard(rs)
+    if len(roles)>1:
+        keyboard = get_role_selection_keyboard(roles)
         context.user_data['pending_message'] = msg
-        await msg.reply_text(
-            "You have multiple roles. Choose which to use:",
-            reply_markup=keyboard
-        )
+        await msg.reply_text("You have multiple roles. Which do you want to use?", reply_markup=keyboard)
         return SELECT_ROLE
     else:
-        sr = rs[0]
+        sr = roles[0]
         context.user_data['sender_role'] = sr
-        troles = SENDING_ROLE_TARGETS.get(sr, [])
+        t_roles = SENDING_ROLE_TARGETS.get(sr, [])
         tids = set()
-        for x in troles:
+        for x in t_roles:
             tids.update(ROLE_MAP.get(x, []))
         if uid in tids:
             tids.remove(uid)
         if not tids:
-            await msg.reply_text("No recipients.")
+            await msg.reply_text("No recipients found.")
             return ConversationHandler.END
-        await send_confirmation(msg, context, sr, list(tids), target_roles=troles)
+        await send_confirmation(msg, context, sr, list(tids), target_roles=t_roles)
         return CONFIRMATION
 
-from telegram.ext import ConversationHandler
-
+# ========================== LECTURE FEATURE ==========================
 LECTURE_ASK_COUNT = 1001
 LECTURE_DATA = {
     'count': 0,
@@ -1074,24 +1088,26 @@ LECTURE_FIELD_ROLE_MAP = {
 }
 
 async def lecture_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin only => create multiple lectures."""
     if update.effective_user.id != 6177929931:
-        await update.message.reply_text("Not authorized.")
+        await update.message.reply_text("Not authorized for /lecture.")
         return ConversationHandler.END
     await update.message.reply_text("How many lectures do you want to create? (1-50)")
     return LECTURE_ASK_COUNT
 
 async def lecture_ask_count_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text.strip()
+    text = update.message.text.strip()
     try:
-        c = int(txt)
-        if c < 1 or c > 50:
+        count = int(text)
+        if count<1 or count>50:
             raise ValueError
     except ValueError:
-        await update.message.reply_text("Please enter a valid integer 1-50.")
+        await update.message.reply_text("Please enter a valid integer (1-50).")
         return ConversationHandler.END
-    LECTURE_DATA['count'] = c
+
+    LECTURE_DATA['count'] = count
     LECTURE_DATA['registrations'] = {}
-    for i in range(1, c+1):
+    for i in range(1, count+1):
         LECTURE_DATA['registrations'][i] = {
             'writer': [],
             'editor': [],
@@ -1102,50 +1118,53 @@ async def lecture_ask_count_handler(update: Update, context: ContextTypes.DEFAUL
             'note': [],
             'group': None
         }
+
     all_ids = set()
-    for v in ROLE_MAP.values():
-        for x in v:
+    for rids in ROLE_MAP.values():
+        for x in rids:
             all_ids.add(x)
+
+    # send them the initial
     for uid in all_ids:
         try:
-            m = await context.bot.send_message(chat_id=uid, text=_lecture_build_status_text())
-            LECTURE_DATA['message_ids'][uid] = (uid, m.message_id)
+            msg = await context.bot.send_message(chat_id=uid, text=_lecture_status_text(), parse_mode='HTML')
+            LECTURE_DATA['message_ids'][uid] = (uid, msg.message_id)
             await context.bot.edit_message_reply_markup(
                 chat_id=uid,
-                message_id=m.message_id,
+                message_id=msg.message_id,
                 reply_markup=_lecture_build_keyboard()
             )
         except Exception as e:
-            logger.error(f"Could not send lecture reg to {uid}: {e}")
-    await update.message.reply_text(f"Created {c} lectures. All notified.")
+            logger.error(f"Failed to send lecture registration to {uid}: {e}")
+
+    await update.message.reply_text(f"Created {count} lectures. Everyone notified.")
     return ConversationHandler.END
 
-def _lecture_build_status_text():
-    lines = []
-    lines.append("**Lecture Registrations**")
+def _lecture_status_text():
+    lines = ["<b>Lecture Registrations</b>"]
     if LECTURE_DATA['count'] == 0:
-        return "No lectures."
+        return "No lectures created yet."
     for i in range(1, LECTURE_DATA['count']+1):
-        d = LECTURE_DATA['registrations'][i]
-        line = f"\n**Lecture {i}:**\n"
-        line += f"Writer: { _fmt_list(d['writer']) }\n"
-        line += f"Editor: { _fmt_list(d['editor']) }\n"
-        line += f"Digital: { _fmt_list(d['digital']) }\n"
-        line += f"Designer: { _fmt_list(d['designer']) }\n"
-        line += f"MCQs: { _fmt_list(d['mcqs']) }\n"
-        line += f"Mindmaps: { _fmt_list(d['mindmaps']) }\n"
-        line += f"Note: { _fmt_list(d['note']) }\n"
-        line += f"Group: {d['group'] if d['group'] else 'None'}\n"
+        data = LECTURE_DATA['registrations'][i]
+        line = f"\n<b>Lecture {i}:</b>\n"
+        line += f"Writer: {_fmt_lecture_list(data['writer'])}\n"
+        line += f"Editor: {_fmt_lecture_list(data['editor'])}\n"
+        line += f"Digital: {_fmt_lecture_list(data['digital'])}\n"
+        line += f"Designer: {_fmt_lecture_list(data['designer'])}\n"
+        line += f"MCQs: {_fmt_lecture_list(data['mcqs'])}\n"
+        line += f"Mindmaps: {_fmt_lecture_list(data['mindmaps'])}\n"
+        line += f"Note: {_fmt_lecture_list(data['note'])}\n"
+        line += f"Group: {data['group'] if data['group'] else 'None'}\n"
         lines.append(line)
     return "\n".join(lines)
 
-def _fmt_list(l):
-    if not l:
+def _fmt_lecture_list(lst):
+    if not lst:
         return "None"
-    return ", ".join(str(x) for x in l)
+    return ", ".join(str(x) for x in lst)
 
 def _lecture_build_keyboard():
-    if LECTURE_DATA['count'] == 0:
+    if LECTURE_DATA['count']==0:
         return None
     kb = [[InlineKeyboardButton("Register/Unregister", callback_data="lectureReg:openMenu")]]
     return InlineKeyboardMarkup(kb)
@@ -1154,91 +1173,98 @@ async def lecture_callback_handler(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     await query.answer()
     data = query.data
+
     if data == "lectureReg:openMenu":
         kb = []
         row = []
         for i in range(1, LECTURE_DATA['count']+1):
             row.append(InlineKeyboardButton(str(i), callback_data=f"lectureReg:pickLecture:{i}"))
-            if len(row) == 8:
+            if len(row)==8:
                 kb.append(row)
-                row = []
+                row=[]
         if row:
             kb.append(row)
         kb.append([InlineKeyboardButton("Cancel", callback_data="lectureReg:cancel")])
-        await query.edit_message_text("Choose a Lecture number:", reply_markup=InlineKeyboardMarkup(kb))
+        await query.edit_message_text("Pick a Lecture number:", reply_markup=InlineKeyboardMarkup(kb))
         return
+
     if data.startswith("lectureReg:pickLecture:"):
-        _, _, num = data.split(":")
-        idx = int(num)
+        parts = data.split(":")
+        lecture_idx = int(parts[2])
         fields = ["writer","editor","digital","designer","mcqs","mindmaps","note","group"]
         kb = []
-        row = []
+        row=[]
         for f in fields:
-            row.append(InlineKeyboardButton(f.capitalize(), callback_data=f"lectureReg:pickField:{idx}:{f}"))
-            if len(row) == 3:
+            row.append(InlineKeyboardButton(f.capitalize(), callback_data=f"lectureReg:pickField:{lecture_idx}:{f}"))
+            if len(row)==3:
                 kb.append(row)
-                row = []
+                row=[]
         if row:
             kb.append(row)
         kb.append([InlineKeyboardButton("Cancel", callback_data="lectureReg:cancel")])
-        await query.edit_message_text(f"Lecture {idx}: pick a field to register/unregister.", reply_markup=InlineKeyboardMarkup(kb))
+        await query.edit_message_text(f"Lecture {lecture_idx}: pick a field to register/unregister.", 
+                                      reply_markup=InlineKeyboardMarkup(kb))
         return
+
     if data.startswith("lectureReg:pickField:"):
-        _, _, num, field = data.split(":")
-        idx = int(num)
-        uid = query.from_user.id
-        reg_list = LECTURE_DATA['registrations'][idx][field]
-        if field == "note":
-            if uid not in reg_list:
-                reg_list.append(uid)
-                msg = f"You registered for Note in Lecture {idx}."
+        # format: lectureReg:pickField:idx:field
+        parts = data.split(":")
+        lecture_idx = int(parts[2])
+        field_name = parts[3]
+        user_id = query.from_user.id
+        reg_list = LECTURE_DATA['registrations'][lecture_idx][field_name]
+        if field_name == "note":
+            if user_id not in reg_list:
+                reg_list.append(user_id)
+                msg="You registered for Note."
             else:
-                reg_list.remove(uid)
-                msg = f"You unregistered from Note in Lecture {idx}."
-        elif field == "group":
-            roles = get_user_roles(uid)
+                reg_list.remove(user_id)
+                msg="You unregistered from Note."
+        elif field_name=="group":
+            roles = get_user_roles(user_id)
             if "group_admin" not in roles:
-                await query.edit_message_text("No permission to assign a group.")
+                await query.edit_message_text("You do not have permission to assign a group.")
                 return
-            cur = LECTURE_DATA['registrations'][idx]['group']
-            if cur is None:
-                LECTURE_DATA['registrations'][idx]['group'] = f"ChosenBy_{uid}"
-                msg = f"You assigned a group for Lecture {idx}."
+            current = LECTURE_DATA['registrations'][lecture_idx]['group']
+            if current is None:
+                LECTURE_DATA['registrations'][lecture_idx]['group'] = f"ChosenBy_{user_id}"
+                msg="You assigned a group for this lecture."
             else:
-                LECTURE_DATA['registrations'][idx]['group'] = None
-                msg = f"You cleared the group for Lecture {idx}."
+                LECTURE_DATA['registrations'][lecture_idx]['group'] = None
+                msg="You cleared the group assignment."
         else:
-            needed = LECTURE_FIELD_ROLE_MAP[field]
-            rr = get_user_roles(uid)
-            if needed not in rr:
-                await query.edit_message_text("You do not have the required role.")
+            needed_role = LECTURE_FIELD_ROLE_MAP[field_name]
+            roles = get_user_roles(user_id)
+            if needed_role not in roles:
+                await query.edit_message_text("You do not have the required role for that field.")
                 return
-            if uid in reg_list:
-                reg_list.remove(uid)
-                msg = f"You unregistered from {field.capitalize()} in Lecture {idx}."
+            if user_id in reg_list:
+                reg_list.remove(user_id)
+                msg=f"You unregistered from {field_name.capitalize()}."
             else:
-                reg_list.append(uid)
-                msg = f"You registered for {field.capitalize()} in Lecture {idx}."
+                reg_list.append(user_id)
+                msg=f"You registered for {field_name.capitalize()}."
         await _lecture_update_all(context)
-        await query.edit_message_text(msg, parse_mode='Markdown')
+        await query.edit_message_text(msg)
         return
+
     if data == "lectureReg:cancel":
         await query.edit_message_text("Cancelled.")
         return
 
 async def _lecture_update_all(context: ContextTypes.DEFAULT_TYPE):
-    text = _lecture_build_status_text()
-    for uid, (c, mid) in LECTURE_DATA['message_ids'].items():
+    text = _lecture_status_text()
+    for uid,(chat_id,msg_id) in LECTURE_DATA['message_ids'].items():
         try:
             await context.bot.edit_message_text(
-                chat_id=c,
-                message_id=mid,
+                chat_id=chat_id,
+                message_id=msg_id,
                 text=text,
-                parse_mode='Markdown',
+                parse_mode='HTML',
                 reply_markup=_lecture_build_keyboard()
             )
         except Exception as e:
-            logger.debug(f"Could not update lecture msg for {uid}: {e}")
+            logger.debug(f"Could not update lecture for {uid}: {e}")
 
 lecture_conv_handler = ConversationHandler(
     entry_points=[CommandHandler("lecture", lecture_command)],
@@ -1252,18 +1278,26 @@ lecture_conv_handler = ConversationHandler(
 )
 lecture_callbackquery_handler = CallbackQueryHandler(lecture_callback_handler, pattern="^lectureReg:")
 
+# ======================== ERROR HANDLER =========================
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Exception: {context.error}", exc_info=True)
     if isinstance(update, Update) and update.message:
-        await update.message.reply_text("An error occurred.")
+        try:
+            await update.message.reply_text("An error occurred.")
+        except:
+            pass
+
+# ============================= MAIN =============================
 
 def main():
     BOT_TOKEN = os.getenv('BOT_TOKEN')
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN not set.")
+        logger.error("BOT_TOKEN is not set.")
         return
+
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
+    # Basic commands
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('listusers', list_users))
     application.add_handler(CommandHandler('help', help_command))
@@ -1272,16 +1306,30 @@ def main():
     application.add_handler(CommandHandler('muteid', mute_id_command))
     application.add_handler(CommandHandler('unmuteid', unmute_id_command))
     application.add_handler(CommandHandler('listmuted', list_muted_command))
+
+    # /check & -check
     application.add_handler(CommandHandler('check', check_user_command))
-    application.add_handler(MessageHandler(filters.Regex(re.compile(r'^-check\s+(\d+)$', re.IGNORECASE)), check_user_command))
+    application.add_handler(
+        MessageHandler(
+            filters.Regex(re.compile(r'^-check\s+(\d+)$', re.IGNORECASE)),
+            check_user_command
+        )
+    )
+
+    # Role add/remove
     application.add_handler(CommandHandler('roleadd', roleadd_command))
     application.add_handler(CommandHandler('role_r', roleremove_command))
+
+    # Group set + Tara broadcast
     application.add_handler(CommandHandler('setgroup', setgroup_command))
     application.add_handler(CommandHandler('taramsg', taramsg_command))
+
+    # Conversation handlers
     application.add_handler(user_id_conv_handler)
     application.add_handler(specific_user_conv_handler)
     application.add_handler(specific_team_conv_handler)
 
+    # -team => role + Tara
     team_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex(re.compile(r'^-team$', re.IGNORECASE)), team_trigger)],
         states={
@@ -1296,13 +1344,14 @@ def main():
                     confirmation_handler,
                     pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
                 )
-            ],
+            ]
         },
         fallbacks=[CommandHandler('cancel', cancel)],
         per_message=True
     )
     application.add_handler(team_conv)
 
+    # -t => Tara only
     tara_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex(re.compile(r'^-t$', re.IGNORECASE)), tara_trigger)],
         states={
@@ -1314,13 +1363,14 @@ def main():
                     confirmation_handler,
                     pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
                 )
-            ],
+            ]
         },
         fallbacks=[CommandHandler('cancel', cancel)],
         per_message=True
     )
     application.add_handler(tara_conv)
 
+    # General messages
     general_conv = ConversationHandler(
         entry_points=[
             MessageHandler(
@@ -1340,7 +1390,7 @@ def main():
                     confirmation_handler,
                     pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
                 )
-            ],
+            ]
         },
         fallbacks=[CommandHandler('cancel', cancel)],
         per_message=True,
@@ -1348,6 +1398,7 @@ def main():
     )
     application.add_handler(general_conv)
 
+    # Lecture system
     application.add_handler(lecture_conv_handler)
     application.add_handler(lecture_callbackquery_handler)
 
