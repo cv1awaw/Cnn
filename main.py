@@ -348,7 +348,6 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         real_user_display_name = get_display_name(message_to_send.from_user)  # Full name or @username
         real_username = message_to_send.from_user.username or "No username"
         real_id = message_to_send.from_user.id
-        # Prepare the info message
         info_message = (
             "🔒 *Anonymous Feedback Sender Info*\n\n"
             f"- User ID: `{real_id}`\n"
@@ -1095,8 +1094,8 @@ async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_muted_users()
 
         target_username = None
-        for uname, uid in user_data_store.items():
-            if uid == target_user_id:
+        for uname, stored_id in user_data_store.items():
+            if stored_id == target_user_id:
                 target_username = uname
                 break
 
@@ -1364,3 +1363,340 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+
+
+# ------------------------------------------------------------------------------
+# 1) LECTURE REGISTRATION FEATURE
+# ------------------------------------------------------------------------------
+
+from telegram.ext import ConversationHandler
+
+# Additional states for the lecture conversation:
+LECTURE_ASK_COUNT = 1001
+LECTURE_REGISTRATION = 1002
+
+# Global dictionary to store info about lectures:
+# We'll store:
+# {
+#    'count': int (number of lectures),
+#    'registrations': {
+#         lecture_index (1-based): {
+#             'writer': [user_ids],
+#             'editor': [user_ids],
+#             'digital': [user_ids],
+#             'designer': [user_ids],
+#             'mcqs': [user_ids],
+#             'mindmaps': [user_ids],
+#             'note': [user_ids],
+#             'group': None or string,
+#          },
+#         ...
+#    },
+#    'message_ids': {
+#         user_id: (chat_id, message_id),
+#         ...
+#    }
+# }
+LECTURE_DATA = {
+    'count': 0,
+    'registrations': {},
+    'message_ids': {}
+}
+
+# We'll define which roles can sign up for which fields:
+LECTURE_FIELD_ROLE_MAP = {
+    'writer': 'writer',
+    'editor': 'checker_team',
+    'digital': 'word_team',
+    'designer': 'design_team',
+    'mcqs': 'mcqs_team',
+    'mindmaps': 'mind_map_form_creator',
+    # 'note' => open to everyone
+    # 'group' => open only to "group_admin" role
+}
+
+# Make sure "group_admin" is in the roles dictionary if not already
+if 'group_admin' not in ROLE_MAP:
+    ROLE_MAP['group_admin'] = []
+ROLE_DISPLAY_NAMES['group_admin'] = "Group Admin"
+
+#
+# STEP 1: /lecture command
+#
+async def lecture_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Only the main admin can do this
+    if update.effective_user.id != 6177929931:
+        await update.message.reply_text("You are not authorized to use this command.")
+        return ConversationHandler.END
+
+    await update.message.reply_text("How many lectures do you want to create?")
+    return LECTURE_ASK_COUNT
+
+#
+# STEP 2: Admin replies with number of lectures
+#
+async def lecture_ask_count_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_input = update.message.text.strip()
+    try:
+        lecture_count = int(user_input)
+        if lecture_count < 1 or lecture_count > 50:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("Please provide a valid positive integer (1-50).")
+        return ConversationHandler.END
+
+    # Store in LECTURE_DATA
+    LECTURE_DATA['count'] = lecture_count
+    # Reset registrations
+    LECTURE_DATA['registrations'] = {}
+    for i in range(1, lecture_count + 1):
+        LECTURE_DATA['registrations'][i] = {
+            'writer': [],
+            'editor': [],
+            'digital': [],
+            'designer': [],
+            'mcqs': [],
+            'mindmaps': [],
+            'note': [],
+            'group': None
+        }
+
+    # We'll gather all user_ids from all roles
+    all_user_ids = set()
+    for r_ids in ROLE_MAP.values():
+        for uid in r_ids:
+            all_user_ids.add(uid)
+
+    for uid in all_user_ids:
+        try:
+            sent_msg = await context.bot.send_message(
+                chat_id=uid,
+                text=_lecture_build_status_text()
+            )
+            # Store the message ID for later updates
+            LECTURE_DATA['message_ids'][uid] = (uid, sent_msg.message_id)
+            # Then attach the keyboard
+            await context.bot.edit_message_reply_markup(
+                chat_id=uid,
+                message_id=sent_msg.message_id,
+                reply_markup=_lecture_build_keyboard()
+            )
+        except Exception as e:
+            logger.error(f"Could not send lecture registration to user {uid}: {e}")
+
+    await update.message.reply_text(
+        f"Created {lecture_count} lectures. Everyone has been notified."
+    )
+    return ConversationHandler.END
+
+#
+# Function to build the text with the current registration status
+#
+def _lecture_build_status_text():
+    lines = []
+    lines.append("**Lecture Registrations**")
+    if LECTURE_DATA['count'] == 0:
+        return "No lectures have been created yet."
+
+    for i in range(1, LECTURE_DATA['count'] + 1):
+        data = LECTURE_DATA['registrations'][i]
+        line = f"\n**Lecture {i}:**\n"
+        line += f"Writer: { _format_user_list(data['writer']) }\n"
+        line += f"Editor: { _format_user_list(data['editor']) }\n"
+        line += f"Digital: { _format_user_list(data['digital']) }\n"
+        line += f"Designer: { _format_user_list(data['designer']) }\n"
+        line += f"MCQs: { _format_user_list(data['mcqs']) }\n"
+        line += f"Mindmaps: { _format_user_list(data['mindmaps']) }\n"
+        line += f"Note: { _format_user_list(data['note']) }\n"
+        line += f"Group: {data['group'] if data['group'] else 'None'}\n"
+        lines.append(line)
+
+    return "\n".join(lines)
+
+def _format_user_list(user_ids):
+    if not user_ids:
+        return "None"
+    return ", ".join(str(uid) for uid in user_ids)
+
+#
+# Function to build the inline keyboard
+#
+def _lecture_build_keyboard():
+    if LECTURE_DATA['count'] == 0:
+        return None
+    buttons = [
+        [InlineKeyboardButton("Register/Unregister", callback_data="lectureReg:openMenu")]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+#
+# Lecture callback handler
+#
+async def lecture_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "lectureReg:openMenu":
+        kb = []
+        row = []
+        for i in range(1, LECTURE_DATA['count'] + 1):
+            row.append(InlineKeyboardButton(str(i), callback_data=f"lectureReg:pickLecture:{i}"))
+            if len(row) == 8:
+                kb.append(row)
+                row = []
+        if row:
+            kb.append(row)
+        kb.append([InlineKeyboardButton("Cancel", callback_data="lectureReg:cancel")])
+        await query.edit_message_text(
+            text="Choose a Lecture number:",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+        return
+
+    if data.startswith("lectureReg:pickLecture:"):
+        parts = data.split(":")
+        lecture_index = int(parts[2])
+        field_kb = []
+        row = []
+        fields = ["writer","editor","digital","designer","mcqs","mindmaps","note","group"]
+        for f in fields:
+            row.append(InlineKeyboardButton(f.capitalize(), callback_data=f"lectureReg:pickField:{lecture_index}:{f}"))
+            if len(row) == 3:
+                field_kb.append(row)
+                row = []
+        if row:
+            field_kb.append(row)
+        field_kb.append([InlineKeyboardButton("Cancel", callback_data="lectureReg:cancel")])
+        await query.edit_message_text(
+            text=f"Lecture {lecture_index}: choose a field to register/unregister.",
+            reply_markup=InlineKeyboardMarkup(field_kb)
+        )
+        return
+
+    if data.startswith("lectureReg:pickField:"):
+        parts = data.split(":")
+        lecture_index = int(parts[2])
+        field_name = parts[3]
+        user_id = query.from_user.id
+        reg_list = LECTURE_DATA['registrations'][lecture_index][field_name]
+
+        if field_name == "note":
+            # Everyone can do note
+            if user_id not in reg_list:
+                reg_list.append(user_id)
+                msg = f"You have registered for Note in Lecture {lecture_index}."
+            else:
+                reg_list.remove(user_id)
+                msg = f"You have *unregistered* from Note in Lecture {lecture_index}."
+
+        elif field_name == "group":
+            # Only group_admin can set a group
+            roles = get_user_roles(user_id)
+            if "group_admin" not in roles:
+                await query.edit_message_text("You do not have permission to assign a group.")
+                return
+            current_val = LECTURE_DATA['registrations'][lecture_index]['group']
+            if current_val is None:
+                LECTURE_DATA['registrations'][lecture_index]['group'] = f"ChosenBy_{user_id}"
+                msg = f"You have assigned a group for Lecture {lecture_index}."
+            else:
+                LECTURE_DATA['registrations'][lecture_index]['group'] = None
+                msg = f"You have cleared the group for Lecture {lecture_index}."
+        else:
+            # writer, editor, digital, designer, mcqs, mindmaps
+            required_role = LECTURE_FIELD_ROLE_MAP[field_name]
+            roles = get_user_roles(user_id)
+            if required_role not in roles:
+                await query.edit_message_text("You do not have the required role to register for this field.")
+                return
+            if user_id in reg_list:
+                reg_list.remove(user_id)
+                msg = f"You have *unregistered* from {field_name.capitalize()} in Lecture {lecture_index}."
+            else:
+                reg_list.append(user_id)
+                msg = f"You have registered for {field_name.capitalize()} in Lecture {lecture_index}."
+
+        await _lecture_update_all(context)
+        await query.edit_message_text(msg, parse_mode='Markdown')
+        return
+
+    if data == "lectureReg:cancel":
+        await query.edit_message_text("Cancelled.")
+        return
+
+async def _lecture_update_all(context: ContextTypes.DEFAULT_TYPE):
+    text = _lecture_build_status_text()
+    for uid, (chat_id, msg_id) in LECTURE_DATA['message_ids'].items():
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text=text,
+                parse_mode='Markdown',
+                reply_markup=_lecture_build_keyboard()
+            )
+        except Exception as e:
+            logger.debug(f"Could not update message for user {uid}: {e}")
+
+lecture_conv_handler = ConversationHandler(
+    entry_points=[CommandHandler("lecture", lecture_command)],
+    states={
+        LECTURE_ASK_COUNT: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, lecture_ask_count_handler)
+        ],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
+
+lecture_callbackquery_handler = CallbackQueryHandler(lecture_callback_handler, pattern="^lectureReg:")
+
+
+# ------------------------------------------------------------------------------
+# 2) GROUP ADMIN / GROUP ASSISTANT ROLES + /listallroles COMMAND
+# ------------------------------------------------------------------------------
+
+# Ensure group_assistant also exists:
+if 'group_assistant' not in ROLE_MAP:
+    ROLE_MAP['group_assistant'] = []
+ROLE_DISPLAY_NAMES['group_assistant'] = "Group Assistant"
+
+async def list_all_roles_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List the ID, display name, username, and roles for every known user (admin-only)."""
+    # Only the main admin can use this command
+    if update.effective_user.id != 6177929931:
+        await update.message.reply_text("You are not authorized to use this command.")
+        return
+
+    if not user_data_store:
+        await update.message.reply_text("No users are registered yet.")
+        return
+
+    lines = []
+    for username_lower, uid in user_data_store.items():
+        # We'll do a best-effort approach to get a display name
+        # We don't have a direct store of first_name/last_name, so let's just do user_id + username
+        # or fetch from the bot if needed, but we'll keep it simple here:
+        user_roles = get_user_roles(uid)
+        if user_roles:
+            roles_display = ", ".join(ROLE_DISPLAY_NAMES.get(r, r) for r in user_roles)
+        else:
+            roles_display = "None"
+
+        # Our final info line: ID, "@" + username_lower, roles
+        lines.append(
+            f"UserID: {uid}, Username: @{username_lower}, Roles: {roles_display}"
+        )
+
+    text_result = "**All Known Users and Roles**\n\n" + "\n".join(lines)
+    await update.message.reply_text(text_result, parse_mode='Markdown')
+
+
+# IMPORTANT: You must add these two lines in `main()` (or near your other command handlers):
+#   application.add_handler(lecture_conv_handler)
+#   application.add_handler(lecture_callbackquery_handler)
+#   application.add_handler(CommandHandler('listallroles', list_all_roles_command))
+
+# That completes the new code.
