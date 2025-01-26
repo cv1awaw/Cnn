@@ -994,8 +994,22 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📌 *Notes:*\n"
         "- Only Tara Team members can use side commands like `-@username`, `-w`, `-e`, etc.\n"
         "- Use `/cancel` to cancel any ongoing operation.\n"
-        "- If you have *no role*, you can send anonymous feedback to all teams."
+        "- If you have *no role*, you can send anonymous feedback to all teams.\n"
     )
+
+    #
+    # NEW additions about lecture + listallroles + group admin
+    #
+    help_text += (
+        "\n"
+        "➕ *New Features:*\n"
+        "`/lecture` - (Admin only) Create N lectures for everyone to register.\n"
+        "`/listallroles` - (Admin only) Shows each registered user with their ID and roles.\n\n"
+        "*New Roles:* `group_admin` and `group_assistant`\n"
+        " - Add them with `/roleadd <user_id> group_admin` or `group_assistant`.\n"
+        " - `group_admin` can assign a 'Group' in the lecture registration.\n"
+    )
+
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1431,7 +1445,10 @@ async def lecture_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("You are not authorized to use this command.")
         return ConversationHandler.END
 
-    await update.message.reply_text("How many lectures do you want to create?")
+    await update.message.reply_text(
+        "How many lectures do you want to create?\n"
+        "Please reply with a number, e.g. 16."
+    )
     return LECTURE_ASK_COUNT
 
 #
@@ -1487,7 +1504,7 @@ async def lecture_ask_count_handler(update: Update, context: ContextTypes.DEFAUL
             logger.error(f"Could not send lecture registration to user {uid}: {e}")
 
     await update.message.reply_text(
-        f"Created {lecture_count} lectures. Everyone has been notified."
+        f"Created {lecture_count} lectures. Everyone has been notified with an interactive message."
     )
     return ConversationHandler.END
 
@@ -1676,16 +1693,12 @@ async def list_all_roles_command(update: Update, context: ContextTypes.DEFAULT_T
 
     lines = []
     for username_lower, uid in user_data_store.items():
-        # We'll do a best-effort approach to get a display name
-        # We don't have a direct store of first_name/last_name, so let's just do user_id + username
-        # or fetch from the bot if needed, but we'll keep it simple here:
         user_roles = get_user_roles(uid)
         if user_roles:
             roles_display = ", ".join(ROLE_DISPLAY_NAMES.get(r, r) for r in user_roles)
         else:
             roles_display = "None"
 
-        # Our final info line: ID, "@" + username_lower, roles
         lines.append(
             f"UserID: {uid}, Username: @{username_lower}, Roles: {roles_display}"
         )
@@ -1694,9 +1707,9 @@ async def list_all_roles_command(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text(text_result, parse_mode='Markdown')
 
 
-# IMPORTANT: You must add these two lines in `main()` (or near your other command handlers):
+# IMPORTANT: You must add these lines in `main()` (or near your other command handlers):
 #   application.add_handler(lecture_conv_handler)
 #   application.add_handler(lecture_callbackquery_handler)
 #   application.add_handler(CommandHandler('listallroles', list_all_roles_command))
 
-# That completes the new code.
+# That completes all the new code, including updated help info.
