@@ -46,7 +46,6 @@ ROLE_MAP = {
     'king_team': KING_TEAM_IDS,
     'tara_team': TARA_TEAM_IDS,
     'mind_map_form_creator': MIND_MAP_FORM_CREATOR_IDS,
-
     # NEW ROLES ADDED:
     'group_admin': [],
     'group_assistant': [],
@@ -61,7 +60,6 @@ ROLE_DISPLAY_NAMES = {
     'king_team': 'Admin Team',
     'tara_team': 'Tara Team',
     'mind_map_form_creator': 'Mind Map & Form Creation Team',
-
     # NEW ROLES ADDED:
     'group_admin': 'Group Admin',
     'group_assistant': 'Group Assistant',
@@ -99,7 +97,6 @@ SENDING_ROLE_TARGETS = {
         'group_assistant',
     ],
     'mind_map_form_creator': ['design_team', 'tara_team'],
-
     # Group admin & assistant now also send to each other, Tara, and King Team:
     'group_admin': ['tara_team', 'group_admin', 'group_assistant', 'king_team'],
     'group_assistant': ['tara_team', 'group_admin', 'group_assistant', 'king_team'],
@@ -115,7 +112,7 @@ CONFIRMATION = 5
 SELECT_ROLE = 6
 
 # LECTURE FEATURE STATES
-# First, ask for the subject name
+# First ask for subject, then number of lectures, etc.
 LECTURE_SUBJECT = 90
 LECTURE_ENTER_COUNT = 100
 LECTURE_CONFIRM = 101
@@ -323,15 +320,16 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
     }
 
 # ------------------ Lecture Feature ------------------
-# In this version, the admin first enters a subject name, then the number of lectures.
-# For each lecture, each slot (writer, editor, mcq, design, digital_writer) is initialized as an empty list,
-# allowing multiple users to register. Each slot now has buttons for "Sign up", "Withdraw", and "Update note".
-# Additionally, any user may update the global group number and global lecture note.
+# For each lecture, we keep slots as lists to allow multiple registrations.
+# The broadcast message text is formatted as requested.
+# The inline keyboard is arranged in one row per slot with three buttons:
+# "Register", "Withdraw", and "Note" (for updating a personal note).
+# A final row allows global updates of Group number and Note.
 
 async def broadcast_lecture_info(lecture_num, context: ContextTypes.DEFAULT_TYPE):
     text = await build_lecture_text(lecture_num, context)
     markup = build_lecture_keyboard(lecture_num, context)
-    # Broadcast to all users from all roles
+    # Broadcast to all users (union of all IDs from all roles)
     broadcast_ids = set()
     for ids in ROLE_MAP.values():
         broadcast_ids.update(ids)
@@ -369,49 +367,49 @@ async def build_lecture_text(lecture_num, context: ContextTypes.DEFAULT_TYPE):
     lectures_data = context.user_data.get("lectures", {})
     lecture_info = lectures_data.get(lecture_num, {})
     subject = context.user_data.get("lecture_subject", "Subject")
-    slot_abbr = {"writer": "W", "editor": "E", "mcq": "M", "design": "D", "digital_writer": "DW"}
-    slot_texts = []
-    for slot in slot_abbr:
+    # For each slot, if there are no registrations, display "Not Assigned"
+    slot_titles = {
+        "writer": "Writer",
+        "editor": "Editor",
+        "mcq": "Mcq",
+        "design": "Design",
+        "digital_writer": "Digital Writer"
+    }
+    lines = [f"Lecture #{lecture_num}", f"{subject}"]
+    for slot in ["writer", "editor", "mcq", "design", "digital_writer"]:
         registrations = lecture_info.get("slots", {}).get(slot, [])
         if not registrations:
-            slot_texts.append(f"{slot_abbr[slot]}: NA")
+            line = f"{slot_titles[slot]} - Not Assigned"
         else:
-            reg_texts = []
+            names = []
             for reg in registrations:
                 try:
                     user_obj = await context.bot.get_chat(reg["user_id"])
-                    display = get_display_name(user_obj)
+                    names.append(get_display_name(user_obj))
                 except Exception:
-                    display = f"ID {reg['user_id']}"
-                if reg.get("note"):
-                    display += f" ({reg['note']})"
-                reg_texts.append(display)
-            slot_texts.append(f"{slot_abbr[slot]}: " + ", ".join(reg_texts))
-    group_number = lecture_info.get("group_number") or "NA"
-    global_note = lecture_info.get("note") or "NA"
-    text = f"*Lecture #{lecture_num}: {subject}*\n" + " | ".join(slot_texts) + f"\nGrp: {group_number} | Note: {global_note}"
-    return text
+                    names.append(f"ID {reg['user_id']}")
+            line = f"{slot_titles[slot]} - " + ", ".join(names)
+        lines.append(line)
+    group_number = lecture_info.get("group_number") or "Not Set"
+    global_note = lecture_info.get("note") or "No note"
+    lines.append(f"Group number - {group_number}")
+    lines.append(f"Note - {global_note}")
+    return "\n".join(lines)
 
 def build_lecture_keyboard(lecture_num, context: ContextTypes.DEFAULT_TYPE):
-    lectures_data = context.user_data.get("lectures", {})
-    lecture_info = lectures_data.get(lecture_num, {})
+    # For each slot, create one row with three buttons: Register, Withdraw, and Note.
     keyboard = []
-    slot_names = {"writer": "Writer", "editor": "Editor", "mcq": "Mcq", "design": "Design", "digital_writer": "Digital Writer"}
-    for slot in slot_names:
-        # Row for sign up button
-        keyboard.append([InlineKeyboardButton(f"Sign up as {slot_names[slot]}", callback_data=f"lecture_sign:{lecture_num}:{slot}")])
-        # Row for withdraw and update note buttons
+    for slot in ["writer", "editor", "mcq", "design", "digital_writer"]:
         keyboard.append([
-            InlineKeyboardButton(f"Withdraw from {slot_names[slot]}", callback_data=f"lecture_withdraw:{lecture_num}:{slot}"),
-            InlineKeyboardButton(f"Update note for {slot_names[slot]}", callback_data=f"lecture_updatenote:{lecture_num}:{slot}")
+            InlineKeyboardButton("Register", callback_data=f"lecture_sign:{lecture_num}:{slot}"),
+            InlineKeyboardButton("Withdraw", callback_data=f"lecture_withdraw:{lecture_num}:{slot}"),
+            InlineKeyboardButton("Note", callback_data=f"lecture_updatenote:{lecture_num}:{slot}")
         ])
-    # Global update buttons (for group number and lecture note)
-    group_number = lecture_info.get("group_number")
-    group_btn_text = f"Set Group ({group_number})" if group_number is not None else "Set Group"
-    keyboard.append([InlineKeyboardButton(group_btn_text, callback_data=f"lecture_setgroup:{lecture_num}")])
-    global_note = lecture_info.get("note")
-    note_btn_text = f"Set Note ({global_note})" if global_note is not None else "Set Note"
-    keyboard.append([InlineKeyboardButton(note_btn_text, callback_data=f"lecture_setnote:{lecture_num}")])
+    # Final row: global group and note updates
+    keyboard.append([
+        InlineKeyboardButton("Set Group", callback_data=f"lecture_setgroup:{lecture_num}"),
+        InlineKeyboardButton("Set Global Note", callback_data=f"lecture_setnote:{lecture_num}")
+    ])
     return InlineKeyboardMarkup(keyboard)
 
 # /lecture command: first ask for subject name
@@ -454,7 +452,7 @@ async def lecture_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not count:
         await update.message.reply_text("No lecture count found. Please use /lecture again.")
         return ConversationHandler.END
-    # Initialize lectures data and a broadcast mapping
+    # Initialize lectures data and broadcast mapping
     context.user_data["lectures"] = {}
     context.user_data["lecture_broadcast"] = {}
     for i in range(1, count+1):
@@ -472,7 +470,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await query.answer()
     data = query.data
-    # Handle sign up for a slot
+    # Handle registration
     if data.startswith("lecture_sign:"):
         try:
             _, lec_str, slot = data.split(":")
@@ -481,26 +479,12 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.answer("Invalid data.", show_alert=True)
             return
         user = query.from_user
-        user_roles = get_user_roles(user.id)
-        required_role = None
-        if slot == "writer":
-            required_role = "writer"
-        elif slot == "editor":
-            required_role = "checker_team"  # Editor slot maps to Editor Team
-        elif slot == "mcq":
-            required_role = "mcqs_team"
-        elif slot == "design":
-            required_role = "design_team"
-        elif slot == "digital_writer":
-            required_role = "word_team"
-        if required_role not in user_roles:
-            await query.answer("You are not authorized to register for this slot.", show_alert=True)
-            return
         lectures_data = context.user_data.get("lectures", {})
         if lecture_num not in lectures_data:
             await query.answer("Lecture not found.", show_alert=True)
             return
         registrations = lectures_data[lecture_num]["slots"].get(slot, [])
+        # Allow multiple registrations per slot
         if any(reg["user_id"] == user.id for reg in registrations):
             await query.answer("You are already registered in this slot.", show_alert=True)
             return
@@ -509,7 +493,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("Registered successfully.", show_alert=True)
         return
 
-    # Handle withdraw from a slot
+    # Handle withdrawal
     elif data.startswith("lecture_withdraw:"):
         try:
             _, lec_str, slot = data.split(":")
@@ -532,7 +516,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("Withdrawn successfully.", show_alert=True)
         return
 
-    # Handle update note for a slot (for individual registration)
+    # Handle personal note update for a slot
     elif data.startswith("lecture_updatenote:"):
         try:
             _, lec_str, slot = data.split(":")
@@ -553,7 +537,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.message.reply_text(f"Please enter your new note for the {slot} slot in Lecture #{lecture_num}:")
         return
 
-    # Handle global group number update (now allowed for any user)
+    # Global update: group number
     elif data.startswith("lecture_setgroup:"):
         try:
             _, lec_str = data.split(":")
@@ -565,7 +549,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.message.reply_text(f"Please enter the group number for Lecture #{lecture_num}:")
         return
 
-    # Handle global lecture note update (allowed for any user)
+    # Global update: lecture note
     elif data.startswith("lecture_setnote:"):
         try:
             _, lec_str = data.split(":")
@@ -579,7 +563,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
 
 async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
-    # Handle update note for a registration
+    # Handle personal note update
     if "lecture_updatenote_pending" in context.user_data:
         pending = context.user_data.pop("lecture_updatenote_pending")
         lecture_num = pending["lecture_num"]
@@ -641,7 +625,7 @@ async def lecture_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ------------------ Other Handler Functions ------------------
-# (The remainder of the file is unchanged from your original code.)
+# (The following functions remain unchanged from your previous implementation.)
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
@@ -1529,7 +1513,7 @@ lecture_conv_handler = ConversationHandler(
         ],
         LECTURE_SETUP: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, lecture_text_entry),
-            CallbackQueryHandler(lecture_inline_callback, pattern=r'^(lecture_dummy|lecture_sign|lecture_withdraw|lecture_updatenote|lecture_setgroup|lecture_setnote):.*'),
+            CallbackQueryHandler(lecture_inline_callback, pattern=r'^(lecture_sign|lecture_withdraw|lecture_updatenote|lecture_setgroup|lecture_setnote):.*'),
             CommandHandler('finish_lecture', lecture_finish),
             CommandHandler('cancel', lecture_cancel),
         ],
