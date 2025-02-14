@@ -120,6 +120,13 @@ LECTURE_SETUP = 102
 LECTURE_EDIT = 103
 LECTURE_FINISH = 104
 
+# ------------------ Global Variables for Lecture Feature ------------------
+# These globals are used so that lecture data is shared across all users.
+LECTURE_STORE = {}         # { lecture_num: { "slots": {slot: [registrations]}, "group_number": ..., "note": ... } }
+LECTURE_BROADCAST = {}     # { lecture_num: [ { "chat_id": ..., "message_id": ... }, ... ] }
+GLOBAL_LECTURE_SUBJECT = None
+GLOBAL_LECTURE_COUNT = 0
+
 # ------------------ User Data Storage ------------------
 
 USER_DATA_FILE = Path('user_data.json')
@@ -320,12 +327,8 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
     }
 
 # ------------------ Lecture Feature ------------------
-# For each lecture, we keep slots as lists to allow multiple registrations.
-# The broadcast message text is formatted as requested.
-# The inline keyboard is arranged in one row per slot with three buttons:
-# "Register", "Withdraw", and "Note" (for updating a personal note).
-# A final row allows global updates of Group number and Note.
-
+# The lecture creation is only initiated by the admin (user ID 6177929931),
+# but once the broadcast messages are sent, any user can register or update their registration.
 async def broadcast_lecture_info(lecture_num, context: ContextTypes.DEFAULT_TYPE):
     text = await build_lecture_text(lecture_num, context)
     markup = build_lecture_keyboard(lecture_num, context)
@@ -350,7 +353,7 @@ async def broadcast_lecture_info(lecture_num, context: ContextTypes.DEFAULT_TYPE
 async def update_broadcast(lecture_num, context: ContextTypes.DEFAULT_TYPE):
     text = await build_lecture_text(lecture_num, context)
     markup = build_lecture_keyboard(lecture_num, context)
-    broadcast_list = context.user_data.get("lecture_broadcast", {}).get(lecture_num, [])
+    broadcast_list = LECTURE_BROADCAST.get(lecture_num, [])
     for msg_info in broadcast_list:
         try:
             await context.bot.edit_message_text(
@@ -364,10 +367,9 @@ async def update_broadcast(lecture_num, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Failed to update broadcast lecture message for lecture {lecture_num}: {e}")
 
 async def build_lecture_text(lecture_num, context: ContextTypes.DEFAULT_TYPE):
-    lectures_data = context.user_data.get("lectures", {})
-    lecture_info = lectures_data.get(lecture_num, {})
-    subject = context.user_data.get("lecture_subject", "Subject")
-    # For each slot, if there are no registrations, display "Not Assigned"
+    global LECTURE_STORE, GLOBAL_LECTURE_SUBJECT
+    lecture_info = LECTURE_STORE.get(lecture_num, {})
+    subject = GLOBAL_LECTURE_SUBJECT if GLOBAL_LECTURE_SUBJECT else "Subject"
     slot_titles = {
         "writer": "Writer",
         "editor": "Editor",
@@ -397,7 +399,6 @@ async def build_lecture_text(lecture_num, context: ContextTypes.DEFAULT_TYPE):
     return "\n".join(lines)
 
 def build_lecture_keyboard(lecture_num, context: ContextTypes.DEFAULT_TYPE):
-    # For each slot, create one row with three buttons: Register, Withdraw, and Note.
     keyboard = []
     for slot in ["writer", "editor", "mcq", "design", "digital_writer"]:
         keyboard.append([
@@ -405,14 +406,13 @@ def build_lecture_keyboard(lecture_num, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("Withdraw", callback_data=f"lecture_withdraw:{lecture_num}:{slot}"),
             InlineKeyboardButton("Note", callback_data=f"lecture_updatenote:{lecture_num}:{slot}")
         ])
-    # Final row: global group and note updates
     keyboard.append([
         InlineKeyboardButton("Set Group", callback_data=f"lecture_setgroup:{lecture_num}"),
         InlineKeyboardButton("Set Global Note", callback_data=f"lecture_setnote:{lecture_num}")
     ])
     return InlineKeyboardMarkup(keyboard)
 
-# /lecture command: first ask for subject name
+# /lecture command: only admin (user ID 6177929931) can start this conversation.
 async def lecture_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user:
@@ -424,15 +424,17 @@ async def lecture_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return LECTURE_SUBJECT
 
 async def lecture_subject_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global GLOBAL_LECTURE_SUBJECT
     subject = update.message.text.strip()
     if not subject:
         await update.message.reply_text("Please enter a valid subject name.")
         return LECTURE_SUBJECT
-    context.user_data["lecture_subject"] = subject
+    GLOBAL_LECTURE_SUBJECT = subject
     await update.message.reply_text(f"Subject set as: {subject}\nNow, how many lectures do you want to create? (1-50)")
     return LECTURE_ENTER_COUNT
 
 async def lecture_enter_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global GLOBAL_LECTURE_COUNT
     user_input = update.message.text.strip()
     if not user_input.isdigit():
         await update.message.reply_text("Please enter a valid number.")
@@ -441,32 +443,32 @@ async def lecture_enter_count(update: Update, context: ContextTypes.DEFAULT_TYPE
     if count < 1 or count > 50:
         await update.message.reply_text("Please enter a number between 1 and 50.")
         return LECTURE_ENTER_COUNT
-    context.user_data["lecture_count"] = count
+    GLOBAL_LECTURE_COUNT = count
     await update.message.reply_text(
         f"You entered {count} lectures. Type /confirm_lecture to confirm or /cancel to cancel."
     )
     return LECTURE_CONFIRM
 
 async def lecture_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    count = context.user_data.get("lecture_count")
-    if not count:
+    global LECTURE_STORE, LECTURE_BROADCAST, GLOBAL_LECTURE_COUNT, GLOBAL_LECTURE_SUBJECT
+    if GLOBAL_LECTURE_COUNT == 0:
         await update.message.reply_text("No lecture count found. Please use /lecture again.")
         return ConversationHandler.END
-    # Initialize lectures data and broadcast mapping
-    context.user_data["lectures"] = {}
-    context.user_data["lecture_broadcast"] = {}
-    for i in range(1, count+1):
-        context.user_data["lectures"][i] = {
+    LECTURE_STORE = {}
+    LECTURE_BROADCAST = {}
+    for i in range(1, GLOBAL_LECTURE_COUNT + 1):
+        LECTURE_STORE[i] = {
             "slots": { key: [] for key in ["writer", "editor", "mcq", "design", "digital_writer"] },
             "group_number": None,
             "note": None,
         }
         broadcast_msgs = await broadcast_lecture_info(i, context)
-        context.user_data["lecture_broadcast"][i] = broadcast_msgs
+        LECTURE_BROADCAST[i] = broadcast_msgs
     await update.message.reply_text("Lecture messages have been broadcast to all teams.")
     return LECTURE_SETUP
 
 async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global LECTURE_STORE
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -479,12 +481,10 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.answer("Invalid data.", show_alert=True)
             return
         user = query.from_user
-        lectures_data = context.user_data.get("lectures", {})
-        if lecture_num not in lectures_data:
+        if lecture_num not in LECTURE_STORE:
             await query.answer("Lecture not found.", show_alert=True)
             return
-        registrations = lectures_data[lecture_num]["slots"].get(slot, [])
-        # Allow multiple registrations per slot
+        registrations = LECTURE_STORE[lecture_num]["slots"].get(slot, [])
         if any(reg["user_id"] == user.id for reg in registrations):
             await query.answer("You are already registered in this slot.", show_alert=True)
             return
@@ -502,16 +502,15 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.answer("Invalid data.", show_alert=True)
             return
         user = query.from_user
-        lectures_data = context.user_data.get("lectures", {})
-        if lecture_num not in lectures_data:
+        if lecture_num not in LECTURE_STORE:
             await query.answer("Lecture not found.", show_alert=True)
             return
-        registrations = lectures_data[lecture_num]["slots"].get(slot, [])
+        registrations = LECTURE_STORE[lecture_num]["slots"].get(slot, [])
         new_regs = [reg for reg in registrations if reg["user_id"] != user.id]
         if len(new_regs) == len(registrations):
             await query.answer("You are not registered in this slot.", show_alert=True)
             return
-        lectures_data[lecture_num]["slots"][slot] = new_regs
+        LECTURE_STORE[lecture_num]["slots"][slot] = new_regs
         await update_broadcast(lecture_num, context)
         await query.answer("Withdrawn successfully.", show_alert=True)
         return
@@ -525,11 +524,10 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.answer("Invalid data.", show_alert=True)
             return
         user = query.from_user
-        lectures_data = context.user_data.get("lectures", {})
-        if lecture_num not in lectures_data:
+        if lecture_num not in LECTURE_STORE:
             await query.answer("Lecture not found.", show_alert=True)
             return
-        registrations = lectures_data[lecture_num]["slots"].get(slot, [])
+        registrations = LECTURE_STORE[lecture_num]["slots"].get(slot, [])
         if not any(reg["user_id"] == user.id for reg in registrations):
             await query.answer("You are not registered in this slot.", show_alert=True)
             return
@@ -562,6 +560,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         return
 
 async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global LECTURE_STORE
     user_text = update.message.text.strip()
     # Handle personal note update
     if "lecture_updatenote_pending" in context.user_data:
@@ -569,9 +568,8 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
         lecture_num = pending["lecture_num"]
         slot = pending["slot"]
         user_id = pending["user_id"]
-        lectures_data = context.user_data.get("lectures", {})
-        if lecture_num in lectures_data:
-            registrations = lectures_data[lecture_num]["slots"].get(slot, [])
+        if lecture_num in LECTURE_STORE:
+            registrations = LECTURE_STORE[lecture_num]["slots"].get(slot, [])
             for reg in registrations:
                 if reg["user_id"] == user_id:
                     reg["note"] = user_text
@@ -582,51 +580,51 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Handle global group number update
     if "lecture_setgroup_pending" in context.user_data:
         lecture_num = context.user_data.pop("lecture_setgroup_pending")
-        lectures_data = context.user_data.get("lectures", {})
-        if lecture_num in lectures_data:
-            lectures_data[lecture_num]["group_number"] = user_text
+        if lecture_num in LECTURE_STORE:
+            LECTURE_STORE[lecture_num]["group_number"] = user_text
             await update.message.reply_text(f"Group number for Lecture #{lecture_num} set to: {user_text}")
             await update_broadcast(lecture_num, context)
         return LECTURE_SETUP
     # Handle global lecture note update
     if "lecture_setnote_pending" in context.user_data:
         lecture_num = context.user_data.pop("lecture_setnote_pending")
-        lectures_data = context.user_data.get("lectures", {})
-        if lecture_num in lectures_data:
-            lectures_data[lecture_num]["note"] = user_text
+        if lecture_num in LECTURE_STORE:
+            LECTURE_STORE[lecture_num]["note"] = user_text
             await update.message.reply_text(f"Global note for Lecture #{lecture_num} set to: {user_text}")
             await update_broadcast(lecture_num, context)
         return LECTURE_SETUP
     return LECTURE_SETUP
 
 async def lecture_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global LECTURE_STORE, LECTURE_BROADCAST, GLOBAL_LECTURE_COUNT, GLOBAL_LECTURE_SUBJECT
     user = update.effective_user
     if user.id != 6177929931:
         await update.message.reply_text("You are not authorized to cancel lecture creation.")
         return ConversationHandler.END
-    context.user_data.pop("lecture_count", None)
-    context.user_data.pop("lectures", None)
-    context.user_data.pop("lecture_broadcast", None)
+    GLOBAL_LECTURE_COUNT = 0
+    LECTURE_STORE.clear()
+    LECTURE_BROADCAST.clear()
+    GLOBAL_LECTURE_SUBJECT = None
     await update.message.reply_text("Lecture creation cancelled.")
     return ConversationHandler.END
 
 async def lecture_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global LECTURE_STORE, LECTURE_BROADCAST, GLOBAL_LECTURE_COUNT, GLOBAL_LECTURE_SUBJECT
     user = update.effective_user
     if user.id != 6177929931:
         await update.message.reply_text("You are not authorized to finish lecture creation.")
         return ConversationHandler.END
-    if "lectures" not in context.user_data:
+    if not LECTURE_STORE:
         await update.message.reply_text("No active lectures to finish.")
         return ConversationHandler.END
     await update.message.reply_text("Lecture creation completed. The broadcast messages remain updated.")
-    context.user_data.pop("lecture_count", None)
-    context.user_data.pop("lectures", None)
-    context.user_data.pop("lecture_broadcast", None)
+    GLOBAL_LECTURE_COUNT = 0
+    LECTURE_STORE.clear()
+    LECTURE_BROADCAST.clear()
+    GLOBAL_LECTURE_SUBJECT = None
     return ConversationHandler.END
 
 # ------------------ Other Handler Functions ------------------
-# (The following functions remain unchanged from your previous implementation.)
-
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
