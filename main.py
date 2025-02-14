@@ -127,14 +127,14 @@ GLOBAL_LECTURE_SUBJECT = None
 GLOBAL_LECTURE_COUNT = 0
 
 # ------------------ Global Variables for Lecture Test Feature ------------------
-# These are used for testing purposes (allowed only for the tester account).
+# These are used for testing purposes (allowed only for testers).
 TEST_LECTURE_STORE = {}
 TEST_LECTURE_BROADCAST = {}
 TEST_GLOBAL_LECTURE_SUBJECT = None
 TEST_GLOBAL_LECTURE_COUNT = 0
 
-# Set the tester user ID (adjust this value as needed)
-TESTER_ID = 1111111111
+# Global set to store tester IDs. Use the /addtester command to add a tester.
+TESTER_IDS = set()
 
 # ------------------ User Data Storage ------------------
 
@@ -478,9 +478,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
     data = query.data
     test_mode = data.endswith(":test")
     if test_mode:
-        # Remove the test suffix for processing
         data = data.replace(":test", "")
-    # Handle registration
     if data.startswith("lecture_sign:"):
         try:
             _, lec_str, slot = data.split(":")
@@ -497,13 +495,11 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         if any(reg["user_id"] == user.id for reg in registrations):
             await query.answer("You are already registered in this slot.", show_alert=True)
             return
-        # Store user id along with display name
         registrations.append({"user_id": user.id, "display_name": get_display_name(user), "note": ""})
         await update_broadcast(lecture_num, context, test_mode=test_mode)
         await query.answer("Registered successfully.", show_alert=True)
         return
 
-    # Handle withdrawal
     elif data.startswith("lecture_withdraw:"):
         try:
             _, lec_str, slot = data.split(":")
@@ -526,7 +522,6 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("Withdrawn successfully.", show_alert=True)
         return
 
-    # Handle personal note update for a slot
     elif data.startswith("lecture_updatenote:"):
         try:
             _, lec_str, slot = data.split(":")
@@ -547,7 +542,6 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.message.reply_text(f"Please enter your new note for the {slot} slot in Lecture #{lecture_num}:")
         return
 
-    # Global update: group number
     elif data.startswith("lecture_setgroup:"):
         try:
             _, lec_str = data.split(":")
@@ -559,7 +553,6 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.message.reply_text(f"Please enter the group number for Lecture #{lecture_num}:")
         return
 
-    # Global update: lecture note
     elif data.startswith("lecture_setnote:"):
         try:
             _, lec_str = data.split(":")
@@ -573,7 +566,6 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
 
 async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
-    # Handle personal note update
     if "lecture_updatenote_pending" in context.user_data:
         pending = context.user_data.pop("lecture_updatenote_pending")
         lecture_num = pending["lecture_num"]
@@ -589,7 +581,6 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text(f"Note updated for your registration in the {slot} slot of Lecture #{lecture_num}.")
             await update_broadcast(lecture_num, context, test_mode=test_mode)
         return LECTURE_SETUP
-    # Handle global group number update
     if "lecture_setgroup_pending" in context.user_data:
         pending = context.user_data.pop("lecture_setgroup_pending")
         lecture_num = pending["lecture_num"]
@@ -600,7 +591,6 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text(f"Group number for Lecture #{lecture_num} set to: {user_text}")
             await update_broadcast(lecture_num, context, test_mode=test_mode)
         return LECTURE_SETUP
-    # Handle global lecture note update
     if "lecture_setnote_pending" in context.user_data:
         pending = context.user_data.pop("lecture_setnote_pending")
         lecture_num = pending["lecture_num"]
@@ -643,10 +633,10 @@ async def lecture_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ------------------ Lecture Test Feature (Tester Only) ------------------
-# These functions are analogous to the lecture functions above but allow the tester (TESTER_ID) to create test lectures.
+# These functions are analogous to the lecture functions above but allow testers to create test lectures.
 async def lecture_test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if not user or user.id != TESTER_ID:
+    if not user or user.id not in TESTER_IDS:
         await update.message.reply_text("You are not authorized to use /lecture_test.")
         return ConversationHandler.END
     await update.message.reply_text("Please enter the subject name for the test lectures (e.g. Test Subject):")
@@ -699,7 +689,7 @@ async def lecture_test_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
 async def lecture_test_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global TEST_LECTURE_STORE, TEST_LECTURE_BROADCAST, TEST_GLOBAL_LECTURE_COUNT, TEST_GLOBAL_LECTURE_SUBJECT
     user = update.effective_user
-    if user.id != TESTER_ID:
+    if user.id not in TESTER_IDS:
         await update.message.reply_text("You are not authorized to cancel test lecture creation.")
         return ConversationHandler.END
     TEST_GLOBAL_LECTURE_COUNT = 0
@@ -712,7 +702,7 @@ async def lecture_test_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def lecture_test_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global TEST_LECTURE_STORE, TEST_LECTURE_BROADCAST, TEST_GLOBAL_LECTURE_COUNT, TEST_GLOBAL_LECTURE_SUBJECT
     user = update.effective_user
-    if user.id != TESTER_ID:
+    if user.id not in TESTER_IDS:
         await update.message.reply_text("You are not authorized to finish test lecture creation.")
         return ConversationHandler.END
     if not TEST_LECTURE_STORE:
@@ -724,6 +714,23 @@ async def lecture_test_finish(update: Update, context: ContextTypes.DEFAULT_TYPE
     TEST_LECTURE_BROADCAST.clear()
     TEST_GLOBAL_LECTURE_SUBJECT = None
     return ConversationHandler.END
+
+# ------------------ New Command: Add Tester (Admin Only) ------------------
+async def add_tester_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Only admin (user ID 6177929931) is allowed to add testers.
+    if update.effective_user.id != 6177929931:
+        await update.message.reply_text("You are not authorized to use this command.")
+        return
+    if len(context.args) != 1:
+        await update.message.reply_text("Usage: /addtester <user_id>")
+        return
+    try:
+        tester_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Please provide a valid user ID.")
+        return
+    TESTER_IDS.add(tester_id)
+    await update.message.reply_text(f"Tester with user ID {tester_id} has been added.")
 
 # ------------------ Other Handler Functions ------------------
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1292,14 +1299,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*Role Management (admin only):*\n"
         f"/roleadd <user_id> <role_name> - Add a user to one of the following roles: {valid_roles}\n"
         f"/role_r <user_id> <role_name> - Remove a user from one of the above roles.\n\n"
-        "📌 *Notes:*\n"
-        "- Only Tara Team members can use side commands like `-@username`, `-w`, `-e`, etc.\n"
-        "- Use `/cancel` to cancel any ongoing operation.\n"
-        "- If you have *no role*, you can send anonymous feedback to all teams.\n\n"
+        "*Tester Commands:*\n"
+        "/addtester <user_id> - (Admin only) Add a user as a tester for lecture test mode.\n\n"
         "*New Commands:* \n"
-        "`/setgroupname <name>` - (Group Admin / Group Assistant only) Assign a group name that appears next to your display name.\n"
-        "`/lecture` - (Only admin 6177929931 can start/cancel) Create multiple lectures with registration slots.\n"
-        "`/lecture_test` - (Tester only) Create test lectures to try out the lecture functionality."
+        "/setgroupname <name> - (Group Admin / Group Assistant only) Assign a group name that appears next to your display name.\n"
+        "/lecture - (Only admin 6177929931 can start/cancel) Create multiple lectures with registration slots.\n"
+        "/lecture_test - (Testers only) Create test lectures to try out the lecture functionality."
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -1683,9 +1688,11 @@ def main():
     application.add_handler(CommandHandler('role_r', roleremove_command))
     # New group name command
     application.add_handler(CommandHandler('setgroupname', set_group_name))
+    # New addtester command (admin only)
+    application.add_handler(CommandHandler('addtester', add_tester_command))
     # Lecture conversation (admin)
     application.add_handler(lecture_conv_handler)
-    # Lecture test conversation (tester)
+    # Lecture test conversation (testers only)
     application.add_handler(lecture_test_conv_handler)
     # Conversation handlers
     application.add_handler(user_id_conv_handler)
