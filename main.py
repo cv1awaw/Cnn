@@ -27,7 +27,7 @@ from roles import (
     MIND_MAP_FORM_CREATOR_IDS,
 )
 
------------------- Setup Logging ------------------
+#------------------ Setup Logging ------------------
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -35,7 +35,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(name)
 
------------------- Define Roles ------------------
+#------------------ Define Roles ------------------
 
 ROLE_MAP = {
     'writer': WRITER_IDS,
@@ -104,7 +104,7 @@ SENDING_ROLE_TARGETS = {
     'group_assistant': ['tara_team', 'group_admin', 'group_assistant', 'king_team'],
 }
 
------------------- Define Conversation States ------------------
+#------------------ Define Conversation States ------------------
 
 TEAM_MESSAGE = 1
 SPECIFIC_TEAM_MESSAGE = 2
@@ -122,7 +122,7 @@ LECTURE_SETUP = 102
 LECTURE_EDIT = 103
 LECTURE_FINISH = 104
 
------------------- Global Variables for Lecture Feature ------------------
+#------------------ Global Variables for Lecture Feature ------------------
 
 These globals are used so that lecture data is shared across all users.
 
@@ -131,7 +131,7 @@ LECTURE_BROADCAST = {}     # { lecture_num: [ { "chat_id": ..., "message_id": ..
 GLOBAL_LECTURE_SUBJECT = None
 GLOBAL_LECTURE_COUNT = 0
 
------------------- Global Variables for Lecture Test Feature ------------------
+#------------------ Global Variables for Lecture Test Feature ------------------
 
 These are used for testing purposes (allowed only for testers).
 
@@ -144,7 +144,7 @@ Global set to store tester IDs. Use the /addtester command to add a tester.
 
 TESTER_IDS = set()
 
------------------- User Data Storage ------------------
+#------------------ User Data Storage ------------------
 
 USER_DATA_FILE = Path('user_data.json')
 if USER_DATA_FILE.exists():
@@ -174,7 +174,7 @@ def get_user_roles(user_id):
             roles.append(role)
     return roles
 
------------------- Mute Functionality ------------------
+#------------------ Mute Functionality ------------------
 
 MUTED_USERS_FILE = Path('muted_users.json')
 if MUTED_USERS_FILE.exists():
@@ -196,7 +196,7 @@ def save_muted_users():
     except Exception as e:
         logger.error(f"Failed to save muted users: {e}")
 
------------------- Group Name Storage for Group Admin/Assistant ------------------
+#------------------ Group Name Storage for Group Admin/Assistant ------------------
 
 GROUP_NAMES_FILE = Path('group_names.json')
 if GROUP_NAMES_FILE.exists():
@@ -216,7 +216,7 @@ def save_group_names():
     except Exception as e:
         logger.error(f"Failed to save group names: {e}")
 
------------------- Helper Functions ------------------
+#------------------ Helper Functions ------------------
 
 def get_group_name(user_id):
     return group_names_store.get(str(user_id), "")
@@ -343,7 +343,7 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
         'target_roles': target_roles if target_roles else SENDING_ROLE_TARGETS.get(sender_role, [])
     }
 
------------------- Lecture Feature (Admin Only) ------------------
+#------------------ Lecture Feature (Admin Only) ------------------
 
 These functions handle lecture creation and registration.
 
@@ -426,7 +426,7 @@ def build_lecture_keyboard(lecture_num, context: ContextTypes.DEFAULT_TYPE, test
     ])
     return InlineKeyboardMarkup(keyboard)
 
------------------- /lecture command (Admin only) ------------------
+#------------------ /lecture command (Admin only) ------------------
 
 async def lecture_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -644,7 +644,7 @@ async def lecture_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     GLOBAL_LECTURE_SUBJECT = None
     return ConversationHandler.END
 
------------------- Lecture Test Feature (Tester Only) ------------------
+#------------------ Lecture Test Feature (Tester Only) ------------------
 
 These functions are analogous to the lecture functions above but allow testers to create test lectures.
 
@@ -729,7 +729,7 @@ async def lecture_test_finish(update: Update, context: ContextTypes.DEFAULT_TYPE
     TEST_GLOBAL_LECTURE_SUBJECT = None
     return ConversationHandler.END
 
------------------- New Command: Add Tester (Admin Only) ------------------
+#------------------ New Command: Add Tester (Admin Only) ------------------
 
 async def add_tester_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Only admin (user ID 6177929931) is allowed to add testers.
@@ -747,7 +747,7 @@ async def add_tester_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     TESTER_IDS.add(tester_id)
     await update.message.reply_text(f"Tester with user ID {tester_id} has been added.")
 
------------------- Other Handler Functions ------------------
+#------------------ Other Handler Functions ------------------
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
@@ -1497,7 +1497,7 @@ async def set_group_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_group_names()
     await update.message.reply_text(f"Group name set to: {group_name}")
 
------------------- Conversation Handlers ------------------
+#------------------ Conversation Handlers ------------------
 
 user_id_conv_handler = ConversationHandler(
     entry_points=[
@@ -1667,14 +1667,14 @@ lecture_test_conv_handler = ConversationHandler(
     allow_reentry=True,
 )
 
------------------- Error Handler ------------------
+#------------------ Error Handler ------------------
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
     if isinstance(update, Update) and update.message:
         await update.message.reply_text("An error occurred. Please try again later.")
 
------------------- Main Function ------------------
+#------------------ Main Function ------------------
 
 def main():
     BOT_TOKEN = os.getenv('BOT_TOKEN')
