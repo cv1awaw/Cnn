@@ -13,7 +13,7 @@ from telegram.ext import (
     filters,
     ConversationHandler,
     CommandHandler,
-    CallbackQueryHandler, 
+    CallbackQueryHandler,
 )
 
 from roles import (
@@ -27,15 +27,15 @@ from roles import (
     MIND_MAP_FORM_CREATOR_IDS,
 )
 
-# ------------------ Setup Logging ------------------
+------------------ Setup Logging ------------------
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(name)
 
-# ------------------ Define Roles ------------------
+------------------ Define Roles ------------------
 
 ROLE_MAP = {
     'writer': WRITER_IDS,
@@ -65,7 +65,8 @@ ROLE_DISPLAY_NAMES = {
     'group_assistant': 'Group Assistant',
 }
 
-# Define trigger to target roles mapping for Tara Team side commands
+Define trigger to target roles mapping for Tara Team side commands
+
 TRIGGER_TARGET_MAP = {
     '-w': ['writer'],
     '-e': ['checker_team'],
@@ -76,7 +77,8 @@ TRIGGER_TARGET_MAP = {
     '-c': ['checker_team'],
 }
 
-# Updated forwarding rules
+Updated forwarding rules
+
 SENDING_ROLE_TARGETS = {
     'writer': ['mcqs_team', 'checker_team', 'tara_team'],
     'mcqs_team': ['design_team', 'tara_team'],
@@ -102,7 +104,7 @@ SENDING_ROLE_TARGETS = {
     'group_assistant': ['tara_team', 'group_admin', 'group_assistant', 'king_team'],
 }
 
-# ------------------ Define Conversation States ------------------
+------------------ Define Conversation States ------------------
 
 TEAM_MESSAGE = 1
 SPECIFIC_TEAM_MESSAGE = 2
@@ -111,7 +113,8 @@ TARA_MESSAGE = 4
 CONFIRMATION = 5
 SELECT_ROLE = 6
 
-# LECTURE FEATURE STATES
+LECTURE FEATURE STATES
+
 LECTURE_SUBJECT = 90
 LECTURE_ENTER_COUNT = 100
 LECTURE_CONFIRM = 101
@@ -119,24 +122,29 @@ LECTURE_SETUP = 102
 LECTURE_EDIT = 103
 LECTURE_FINISH = 104
 
-# ------------------ Global Variables for Lecture Feature ------------------
-# These globals are used so that lecture data is shared across all users.
+------------------ Global Variables for Lecture Feature ------------------
+
+These globals are used so that lecture data is shared across all users.
+
 LECTURE_STORE = {}         # { lecture_num: { "slots": {slot: [registrations]}, "group_number": ..., "note": ... } }
 LECTURE_BROADCAST = {}     # { lecture_num: [ { "chat_id": ..., "message_id": ... }, ... ] }
 GLOBAL_LECTURE_SUBJECT = None
 GLOBAL_LECTURE_COUNT = 0
 
-# ------------------ Global Variables for Lecture Test Feature ------------------
-# These are used for testing purposes (allowed only for testers).
+------------------ Global Variables for Lecture Test Feature ------------------
+
+These are used for testing purposes (allowed only for testers).
+
 TEST_LECTURE_STORE = {}
 TEST_LECTURE_BROADCAST = {}
 TEST_GLOBAL_LECTURE_SUBJECT = None
 TEST_GLOBAL_LECTURE_COUNT = 0
 
-# Global set to store tester IDs. Use the /addtester command to add a tester.
+Global set to store tester IDs. Use the /addtester command to add a tester.
+
 TESTER_IDS = set()
 
-# ------------------ User Data Storage ------------------
+------------------ User Data Storage ------------------
 
 USER_DATA_FILE = Path('user_data.json')
 if USER_DATA_FILE.exists():
@@ -155,7 +163,7 @@ def save_user_data():
     try:
         with open(USER_DATA_FILE, 'w') as f:
             json.dump(user_data_store, f)
-            logger.info("Saved user data to user_data.json.")
+        logger.info("Saved user data to user_data.json.")
     except Exception as e:
         logger.error(f"Failed to save user data: {e}")
 
@@ -166,7 +174,7 @@ def get_user_roles(user_id):
             roles.append(role)
     return roles
 
-# ------------------ Mute Functionality ------------------
+------------------ Mute Functionality ------------------
 
 MUTED_USERS_FILE = Path('muted_users.json')
 if MUTED_USERS_FILE.exists():
@@ -184,11 +192,11 @@ def save_muted_users():
     try:
         with open(MUTED_USERS_FILE, 'w') as f:
             json.dump(list(muted_users), f)
-            logger.info("Saved muted users to muted_users.json.")
+        logger.info("Saved muted users to muted_users.json.")
     except Exception as e:
         logger.error(f"Failed to save muted users: {e}")
 
-# ------------------ Group Name Storage for Group Admin/Assistant ------------------
+------------------ Group Name Storage for Group Admin/Assistant ------------------
 
 GROUP_NAMES_FILE = Path('group_names.json')
 if GROUP_NAMES_FILE.exists():
@@ -208,7 +216,7 @@ def save_group_names():
     except Exception as e:
         logger.error(f"Failed to save group names: {e}")
 
-# ------------------ Helper Functions ------------------
+------------------ Helper Functions ------------------
 
 def get_group_name(user_id):
     return group_names_store.get(str(user_id), "")
@@ -239,18 +247,18 @@ def get_role_selection_keyboard(roles):
         display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
         callback_data = f"role:{role}"
         keyboard.append([InlineKeyboardButton(display_name, callback_data=callback_data)])
-    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_role_selection')])
+        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_role_selection')])
     return InlineKeyboardMarkup(keyboard)
 
 async def forward_message(bot, message, target_ids, sender_role):
     sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
     username_display = get_display_name(message.from_user)
     if message.document:
-        caption = f"🔄 *This document was sent by **{username_display} ({sender_display_name})**.*"
+        caption = f"🔄 This document was sent by {username_display} ({sender_display_name})."
     elif message.text:
-        caption = f"🔄 *This message was sent by **{username_display} ({sender_display_name})**.*"
+        caption = f"🔄 This message was sent by {username_display} ({sender_display_name})."
     else:
-        caption = f"🔄 *This message was sent by **{username_display} ({sender_display_name})**.*"
+        caption = f"🔄 This message was sent by {username_display} ({sender_display_name})."
     for user_id in target_ids:
         try:
             if message.document:
@@ -285,13 +293,13 @@ async def forward_anonymous_message(bot, message, target_ids):
                 await bot.send_document(
                     chat_id=user_id,
                     document=message.document.file_id,
-                    caption="🔄 *Anonymous feedback.*" + (f"\n\n{message.caption}" if message.caption else ""),
+                    caption="🔄 Anonymous feedback." + (f"\n\n{message.caption}" if message.caption else ""),
                     parse_mode='Markdown'
                 )
             elif message.text:
                 await bot.send_message(
                     chat_id=user_id,
-                    text=f"🔄 *Anonymous feedback.*\n\n{message.text}",
+                    text=f"🔄 Anonymous feedback.\n\n{message.text}",
                     parse_mode='Markdown'
                 )
             else:
@@ -305,9 +313,9 @@ async def forward_anonymous_message(bot, message, target_ids):
 
 async def send_confirmation(message, context, sender_role, target_ids, target_roles=None):
     if message.document:
-        content_description = f"PDF: `{message.document.file_name}`"
+        content_description = f"PDF: {message.document.file_name}"
     elif message.text:
-        content_description = f"Message: `{message.text}`"
+        content_description = f"Message: {message.text}"
     else:
         content_description = "Unsupported message type."
     if target_roles:
@@ -315,7 +323,7 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
     else:
         target_roles_display = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in SENDING_ROLE_TARGETS.get(sender_role, [])]
     confirmation_text = (
-        f"📩 *You are about to send the following to **{', '.join(target_roles_display)}**:*\n\n"
+        f"📩 You are about to send the following to {', '.join(target_roles_display)}:\n\n"
         f"{content_description}\n\n"
         "Do you want to send this?"
     )
@@ -335,8 +343,10 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
         'target_roles': target_roles if target_roles else SENDING_ROLE_TARGETS.get(sender_role, [])
     }
 
-# ------------------ Lecture Feature (Admin Only) ------------------
-# These functions handle lecture creation and registration.
+------------------ Lecture Feature (Admin Only) ------------------
+
+These functions handle lecture creation and registration.
+
 async def broadcast_lecture_info(lecture_num, context: ContextTypes.DEFAULT_TYPE):
     text = await build_lecture_text(lecture_num, context, test_mode=False)
     markup = build_lecture_keyboard(lecture_num, context, test_mode=False)
@@ -416,7 +426,8 @@ def build_lecture_keyboard(lecture_num, context: ContextTypes.DEFAULT_TYPE, test
     ])
     return InlineKeyboardMarkup(keyboard)
 
-# /lecture command (Admin only)
+------------------ /lecture command (Admin only) ------------------
+
 async def lecture_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user:
@@ -471,7 +482,8 @@ async def lecture_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Lecture messages have been broadcast to all teams.")
     return LECTURE_SETUP
 
-# Inline callback for lecture (both register/withdraw/update)
+Inline callback for lecture (both register/withdraw/update)
+
 async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -500,68 +512,68 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("Registered successfully.", show_alert=True)
         return
 
-    elif data.startswith("lecture_withdraw:"):
-        try:
-            _, lec_str, slot = data.split(":")
-            lecture_num = int(lec_str)
-        except ValueError:
-            await query.answer("Invalid data.", show_alert=True)
-            return
-        user = query.from_user
-        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
-        if lecture_num not in store:
-            await query.answer("Lecture not found.", show_alert=True)
-            return
-        registrations = store[lecture_num]["slots"].get(slot, [])
-        new_regs = [reg for reg in registrations if reg["user_id"] != user.id]
-        if len(new_regs) == len(registrations):
-            await query.answer("You are not registered in this slot.", show_alert=True)
-            return
-        store[lecture_num]["slots"][slot] = new_regs
-        await update_broadcast(lecture_num, context, test_mode=test_mode)
-        await query.answer("Withdrawn successfully.", show_alert=True)
-        return
+    elif data.startswith("lecture_withdraw:"):  
+        try:  
+            _, lec_str, slot = data.split(":")  
+            lecture_num = int(lec_str)  
+        except ValueError:  
+            await query.answer("Invalid data.", show_alert=True)  
+            return  
+        user = query.from_user  
+        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE  
+        if lecture_num not in store:  
+            await query.answer("Lecture not found.", show_alert=True)  
+            return  
+        registrations = store[lecture_num]["slots"].get(slot, [])  
+        new_regs = [reg for reg in registrations if reg["user_id"] != user.id]  
+        if len(new_regs) == len(registrations):  
+            await query.answer("You are not registered in this slot.", show_alert=True)  
+            return  
+        store[lecture_num]["slots"][slot] = new_regs  
+        await update_broadcast(lecture_num, context, test_mode=test_mode)  
+        await query.answer("Withdrawn successfully.", show_alert=True)  
+        return  
 
-    elif data.startswith("lecture_updatenote:"):
-        try:
-            _, lec_str, slot = data.split(":")
-            lecture_num = int(lec_str)
-        except ValueError:
-            await query.answer("Invalid data.", show_alert=True)
-            return
-        user = query.from_user
-        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
-        if lecture_num not in store:
-            await query.answer("Lecture not found.", show_alert=True)
-            return
-        registrations = store[lecture_num]["slots"].get(slot, [])
-        if not any(reg["user_id"] == user.id for reg in registrations):
-            await query.answer("You are not registered in this slot.", show_alert=True)
-            return
-        context.user_data["lecture_updatenote_pending"] = {"lecture_num": lecture_num, "slot": slot, "user_id": user.id, "test_mode": test_mode}
-        await query.message.reply_text(f"Please enter your new note for the {slot} slot in Lecture #{lecture_num}:")
-        return
+    elif data.startswith("lecture_updatenote:"):  
+        try:  
+            _, lec_str, slot = data.split(":")  
+            lecture_num = int(lec_str)  
+        except ValueError:  
+            await query.answer("Invalid data.", show_alert=True)  
+            return  
+        user = query.from_user  
+        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE  
+        if lecture_num not in store:  
+            await query.answer("Lecture not found.", show_alert=True)  
+            return  
+        registrations = store[lecture_num]["slots"].get(slot, [])  
+        if not any(reg["user_id"] == user.id for reg in registrations):  
+            await query.answer("You are not registered in this slot.", show_alert=True)  
+            return  
+        context.user_data["lecture_updatenote_pending"] = {"lecture_num": lecture_num, "slot": slot, "user_id": user.id, "test_mode": test_mode}  
+        await query.message.reply_text(f"Please enter your new note for the {slot} slot in Lecture #{lecture_num}:")  
+        return  
 
-    elif data.startswith("lecture_setgroup:"):
-        try:
-            _, lec_str = data.split(":")
-            lecture_num = int(lec_str)
-        except ValueError:
-            await query.answer("Invalid data.", show_alert=True)
-            return
-        context.user_data["lecture_setgroup_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}
-        await query.message.reply_text(f"Please enter the group number for Lecture #{lecture_num}:")
-        return
+    elif data.startswith("lecture_setgroup:"):  
+        try:  
+            _, lec_str = data.split(":")  
+            lecture_num = int(lec_str)  
+        except ValueError:  
+            await query.answer("Invalid data.", show_alert=True)  
+            return  
+        context.user_data["lecture_setgroup_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}  
+        await query.message.reply_text(f"Please enter the group number for Lecture #{lecture_num}:")  
+        return  
 
-    elif data.startswith("lecture_setnote:"):
-        try:
-            _, lec_str = data.split(":")
-            lecture_num = int(lec_str)
-        except ValueError:
-            await query.answer("Invalid data.", show_alert=True)
-            return
-        context.user_data["lecture_setnote_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}
-        await query.message.reply_text(f"Please enter the global note for Lecture #{lecture_num}:")
+    elif data.startswith("lecture_setnote:"):  
+        try:  
+            _, lec_str = data.split(":")  
+            lecture_num = int(lec_str)  
+        except ValueError:  
+            await query.answer("Invalid data.", show_alert=True)  
+            return  
+        context.user_data["lecture_setnote_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}  
+        await query.message.reply_text(f"Please enter the global note for Lecture #{lecture_num}:")  
         return
 
 async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -580,7 +592,7 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     break
             await update.message.reply_text(f"Note updated for your registration in the {slot} slot of Lecture #{lecture_num}.")
             await update_broadcast(lecture_num, context, test_mode=test_mode)
-        return LECTURE_SETUP
+            return LECTURE_SETUP
     if "lecture_setgroup_pending" in context.user_data:
         pending = context.user_data.pop("lecture_setgroup_pending")
         lecture_num = pending["lecture_num"]
@@ -590,7 +602,7 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
             store[lecture_num]["group_number"] = user_text
             await update.message.reply_text(f"Group number for Lecture #{lecture_num} set to: {user_text}")
             await update_broadcast(lecture_num, context, test_mode=test_mode)
-        return LECTURE_SETUP
+            return LECTURE_SETUP
     if "lecture_setnote_pending" in context.user_data:
         pending = context.user_data.pop("lecture_setnote_pending")
         lecture_num = pending["lecture_num"]
@@ -600,7 +612,7 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
             store[lecture_num]["note"] = user_text
             await update.message.reply_text(f"Global note for Lecture #{lecture_num} set to: {user_text}")
             await update_broadcast(lecture_num, context, test_mode=test_mode)
-        return LECTURE_SETUP
+            return LECTURE_SETUP
     return LECTURE_SETUP
 
 async def lecture_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -632,8 +644,10 @@ async def lecture_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     GLOBAL_LECTURE_SUBJECT = None
     return ConversationHandler.END
 
-# ------------------ Lecture Test Feature (Tester Only) ------------------
-# These functions are analogous to the lecture functions above but allow testers to create test lectures.
+------------------ Lecture Test Feature (Tester Only) ------------------
+
+These functions are analogous to the lecture functions above but allow testers to create test lectures.
+
 async def lecture_test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user or user.id not in TESTER_IDS:
@@ -715,7 +729,8 @@ async def lecture_test_finish(update: Update, context: ContextTypes.DEFAULT_TYPE
     TEST_GLOBAL_LECTURE_SUBJECT = None
     return ConversationHandler.END
 
-# ------------------ New Command: Add Tester (Admin Only) ------------------
+------------------ New Command: Add Tester (Admin Only) ------------------
+
 async def add_tester_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Only admin (user ID 6177929931) is allowed to add testers.
     if update.effective_user.id != 6177929931:
@@ -732,7 +747,8 @@ async def add_tester_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     TESTER_IDS.add(tester_id)
     await update.message.reply_text(f"Tester with user ID {tester_id} has been added.")
 
-# ------------------ Other Handler Functions ------------------
+------------------ Other Handler Functions ------------------
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
@@ -747,11 +763,11 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     data = query.data
     if data.startswith('confirm_no_role:'):
         try:
-            _, confirmation_uuid = data.split(':', 1)
+            , confirmation_uuid = data.split(':', 1)
         except ValueError:
             await query.edit_message_text("Invalid confirmation data. Please try again.")
             return ConversationHandler.END
-        confirm_data = context.user_data.get(f'confirm_{confirmation_uuid}')
+        confirm_data = context.user_data.get(f'confirm{confirmation_uuid}')
         if not confirm_data:
             await query.edit_message_text("An error occurred. Please try again.")
             return ConversationHandler.END
@@ -764,13 +780,13 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if user_id in all_target_ids:
             all_target_ids.remove(user_id)
         await forward_anonymous_message(context.bot, message_to_send, list(all_target_ids))
-        await query.edit_message_text("✅ *Your anonymous feedback has been sent to all teams.*", parse_mode='Markdown')
+        await query.edit_message_text("✅ Your anonymous feedback has been sent to all teams.", parse_mode='Markdown')
         real_user_display_name = get_display_name(message_to_send.from_user)
         real_username = message_to_send.from_user.username or "No username"
         real_id = message_to_send.from_user.id
         info_message = (
-            "🔒 *Anonymous Feedback Sender Info*\n\n"
-            f"- User ID: `{real_id}`\n"
+            "🔒 Anonymous Feedback Sender Info\n\n"
+            f"- User ID: {real_id}\n"
             f"- Username: @{real_username}\n"
             f"- Full name: {real_user_display_name}"
         )
@@ -811,18 +827,18 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                     ]
                 if message_to_send.document:
                     confirmation_text = (
-                        f"✅ *Your PDF `{message_to_send.document.file_name}` has been sent "
-                        f"from **{sender_display_name}** to **{', '.join(recipient_display_names)}**.*"
+                        f"✅ Your PDF {message_to_send.document.file_name} has been sent "
+                        f"from {sender_display_name} to {', '.join(recipient_display_names)}."
                     )
                 elif message_to_send.text:
                     confirmation_text = (
-                        f"✅ *Your message has been sent from **{sender_display_name}** "
-                        f"to **{', '.join(recipient_display_names)}**.*"
+                        f"✅ Your message has been sent from {sender_display_name} "
+                        f"to {', '.join(recipient_display_names)}."
                     )
                 else:
                     confirmation_text = (
-                        f"✅ *Your message has been sent from **{sender_display_name}** "
-                        f"to **{', '.join(recipient_display_names)}**.*"
+                        f"✅ Your message has been sent from {sender_display_name} "
+                        f"to {', '.join(recipient_display_names)}."
                     )
                 await query.edit_message_text(confirmation_text, parse_mode='Markdown')
                 del context.user_data[f'confirm_{confirmation_uuid}']
@@ -830,14 +846,14 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 await query.edit_message_text("Operation cancelled.")
                 if f'confirm_{confirmation_uuid}' in context.user_data:
                     del context.user_data[f'confirm_{confirmation_uuid}']
-            return ConversationHandler.END
+                return ConversationHandler.END
     if data.startswith("confirm_userid:"):
         try:
-            _, confirmation_uuid = data.split(':', 1)
+            , confirmation_uuid = data.split(':', 1)
         except ValueError:
             await query.edit_message_text("Invalid confirmation data. Please try again.")
             return ConversationHandler.END
-        confirm_data = context.user_data.get(f'confirm_userid_{confirmation_uuid}')
+        confirm_data = context.user_data.get(f'confirm_userid{confirmation_uuid}')
         if not confirm_data:
             await query.edit_message_text("An error occurred. Please try again.")
             return ConversationHandler.END
@@ -857,7 +873,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                     chat_id=target_id,
                     text=msg_text
                 )
-            await query.edit_message_text("✅ *Your message has been sent.*", parse_mode='Markdown')
+            await query.edit_message_text("✅ Your message has been sent.", parse_mode='Markdown')
             await reply_message.reply_text("sent")
         except Exception as e:
             logger.error(f"Failed to send message to user {target_id}: {e}")
@@ -867,11 +883,11 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
     elif data.startswith("cancel_userid:"):
         try:
-            _, confirmation_uuid = data.split(':', 1)
+            , confirmation_uuid = data.split(':', 1)
         except ValueError:
             await query.edit_message_text("Invalid confirmation data. Please try again.")
             return ConversationHandler.END
-        if f'confirm_userid_{confirmation_uuid}' in context.user_data:
+        if f'confirm_userid{confirmation_uuid}' in context.user_data:
             del context.user_data[f'confirm_userid_{confirmation_uuid}']
         await query.edit_message_text("Operation cancelled.")
         return ConversationHandler.END
@@ -888,19 +904,19 @@ async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TY
     if 'tara_team' not in roles:
         await update.message.reply_text("You are not authorized to use this command.")
         return ConversationHandler.END
-    match = re.match(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', update.message.text, re.IGNORECASE)
+    match = re.match(r'^\s*-@([A-Za-z0-9_]{5,32})\s*$', update.message.text, re.IGNORECASE)
     if not match:
-        await update.message.reply_text("Invalid format. Please use `-@username` to target a user.", parse_mode='Markdown')
+        await update.message.reply_text("Invalid format. Please use -@username to target a user.", parse_mode='Markdown')
         return ConversationHandler.END
     target_username = match.group(1).lower()
     target_user_id = user_data_store.get(target_username)
     if not target_user_id:
-        await update.message.reply_text(f"User `@{target_username}` not found.", parse_mode='Markdown')
+        await update.message.reply_text(f"User @{target_username} not found.", parse_mode='Markdown')
         return ConversationHandler.END
     context.user_data['target_user_id'] = target_user_id
     context.user_data['target_username'] = target_username
     context.user_data['sender_role'] = 'tara_team'
-    await update.message.reply_text(f"Write your message for user `@{target_username}`.", parse_mode='Markdown')
+    await update.message.reply_text(f"Write your message for user @{target_username}.", parse_mode='Markdown')
     return SPECIFIC_USER_MESSAGE
 
 async def specific_user_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1089,7 +1105,7 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await message.reply_text(
-            "You have no roles. Do you want to send this as *anonymous feedback* to all teams?",
+            "You have no roles. Do you want to send this as anonymous feedback to all teams?",
             parse_mode='Markdown',
             reply_markup=reply_markup
         )
@@ -1124,7 +1140,7 @@ async def user_id_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = update.message.text.strip()
     match = re.match(r'^-user_id\s+(\d+)$', message_text, re.IGNORECASE)
     if not match:
-        await update.message.reply_text("Usage: `-user_id <user_id>`", parse_mode='Markdown')
+        await update.message.reply_text("Usage: -user_id <user_id>", parse_mode='Markdown')
         return ConversationHandler.END
     target_id = int(match.group(1))
     await update.message.reply_text(
@@ -1140,13 +1156,13 @@ async def user_id_message_collector(update: Update, context: ContextTypes.DEFAUL
         await message.reply_text("An error occurred. Please try again.")
         return ConversationHandler.END
     if message.document:
-        content_description = f"PDF: `{message.document.file_name}`"
+        content_description = f"PDF: {message.document.file_name}"
     elif message.text:
-        content_description = f"Message: `{message.text}`"
+        content_description = f"Message: {message.text}"
     else:
         content_description = "Unsupported message type."
     confirmation_text = (
-        f"📩 *You are about to send the following to user ID **{target_id}**:*\n\n"
+        f"📩 You are about to send the following to user ID {target_id}:\n\n"
         f"{content_description}\n\n"
         "Do you want to send this?"
     )
@@ -1233,7 +1249,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not roles:
         await update.message.reply_text(
             f"Hello, {display_name}! You currently have no role assigned.\n"
-            "Any message you send me will be forwarded to all teams as *anonymous feedback*.\n"
+            "Any message you send me will be forwarded to all teams as anonymous feedback.\n"
             "Feel free to send your feedback now."
         )
     else:
@@ -1265,43 +1281,43 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_lines.append(f"@{username} => {uid} (Roles: {roles_display})")
     user_list = "\n".join(user_lines)
     await update.message.reply_text(
-        f"**Registered Users (Username => ID):**\n\n{user_list}",
+        f"Registered Users (Username => ID):\n\n{user_list}",
         parse_mode='Markdown'
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     valid_roles = ", ".join(ROLE_MAP.keys())
     help_text = (
-        "📘 *Available Commands:*\n\n"
+        "📘 Available Commands:\n\n"
         "/start - Initialize interaction with the bot.\n"
         "/listusers - List all registered users (Tara Team or admin only).\n"
         "/help - Show this help message.\n"
         "/refresh - Refresh your user information.\n"
         "/cancel - Cancel the current operation.\n\n"
-        "*Message Sending Triggers:*\n"
-        "`-team` - Send a message to your own role and Tara Team.\n"
-        "`-t` - Send a message exclusively to the Tara Team.\n\n"
-        "*Specific Commands for Tara Team:*\n"
-        "`-@username` - Send a message to a specific user.\n"
-        "`-w` - Send a message to the Writer Team.\n"
-        "`-e` or `-c` - Send a message to the Editor Team.\n"
-        "`-mcq` - Send a message to the MCQs Team.\n"
-        "`-d` - Send a message to the Digital Writers.\n"
-        "`-de` - Send a message to the Design Team.\n"
-        "`-mf` - Send a message to the Mind Map & Form Creation Team.\n\n"
-        "*Admin Commands (Tara Team only or admin):*\n"
+        "Message Sending Triggers:\n"
+        "-team - Send a message to your own role and Tara Team.\n"
+        "-t - Send a message exclusively to the Tara Team.\n\n"
+        "Specific Commands for Tara Team:\n"
+        "-@username - Send a message to a specific user.\n"
+        "-w - Send a message to the Writer Team.\n"
+        "-e or -c - Send a message to the Editor Team.\n"
+        "-mcq - Send a message to the MCQs Team.\n"
+        "-d - Send a message to the Digital Writers.\n"
+        "-de - Send a message to the Design Team.\n"
+        "-mf - Send a message to the Mind Map & Form Creation Team.\n\n"
+        "Admin Commands (Tara Team only or admin):\n"
         "/mute [user_id] - Mute yourself or another user.\n"
         "/muteid <user_id> - Mute a specific user by their ID.\n"
         "/unmuteid <user_id> - Unmute a specific user by their ID.\n"
         "/listmuted - List all currently muted users.\n"
-        "`-check <user_id>` or `/check <user_id>` - Check if that user has interacted and what roles they have (admin only).\n"
-        "`-user_id <user_id>` - Only admin can use this to send a message to that user (with confirmation).\n\n"
-        "*Role Management (admin only):*\n"
+        "-check <user_id> or /check <user_id> - Check if that user has interacted and what roles they have (admin only).\n"
+        "-user_id <user_id> - Only admin can use this to send a message to that user (with confirmation).\n\n"
+        "Role Management (admin only):\n"
         f"/roleadd <user_id> <role_name> - Add a user to one of the following roles: {valid_roles}\n"
         f"/role_r <user_id> <role_name> - Remove a user from one of the above roles.\n\n"
-        "*Tester Commands:*\n"
+        "Tester Commands:\n"
         "/addtester <user_id> - (Admin only) Add a user as a tester for lecture test mode.\n\n"
-        "*New Commands:* \n"
+        "New Commands: \n"
         "/setgroupname <name> - (Group Admin / Group Assistant only) Assign a group name that appears next to your display name.\n"
         "/lecture - (Only admin 6177929931 can start/cancel) Create multiple lectures with registration slots.\n"
         "/lecture_test - (Testers only) Create test lectures to try out the lecture functionality."
@@ -1359,7 +1375,7 @@ async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 target_username = uname
                 break
         if target_username:
-            await update.message.reply_text(f"User `@{target_username}` has been muted.", parse_mode='Markdown')
+            await update.message.reply_text(f"User @{target_username} has been muted.", parse_mode='Markdown')
         else:
             await update.message.reply_text(f"User ID {target_user_id} has been muted.")
 
@@ -1393,7 +1409,7 @@ async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 target_username = uname
                 break
         if target_username:
-            await update.message.reply_text(f"User `@{target_username}` has been unmuted.", parse_mode='Markdown')
+            await update.message.reply_text(f"User @{target_username} has been unmuted.", parse_mode='Markdown')
         else:
             await update.message.reply_text(f"User ID {target_user_id} has been unmuted.")
     else:
@@ -1424,7 +1440,7 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         else:
             muted_list.append(f"ID: {uid}")
     muted_users_text = "\n".join(muted_list)
-    await update.message.reply_text(f"**Muted Users:**\n{muted_users_text}", parse_mode='Markdown')
+    await update.message.reply_text(f"Muted Users:\n{muted_users_text}", parse_mode='Markdown')
 
 async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -1461,7 +1477,7 @@ async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         roles_display = "No role (anonymous feedback user)."
     await update.message.reply_text(
-        f"User ID: `{check_id}`\nUsername: `@{username_found}`\nRoles: {roles_display}",
+        f"User ID: {check_id}\nUsername: @{username_found}\nRoles: {roles_display}",
         parse_mode='Markdown'
     )
 
@@ -1481,7 +1497,7 @@ async def set_group_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_group_names()
     await update.message.reply_text(f"Group name set to: {group_name}")
 
-# ------------------ Conversation Handlers ------------------
+------------------ Conversation Handlers ------------------
 
 user_id_conv_handler = ConversationHandler(
     entry_points=[
@@ -1507,7 +1523,7 @@ user_id_conv_handler = ConversationHandler(
 specific_user_conv_handler = ConversationHandler(
     entry_points=[
         MessageHandler(
-            filters.Regex(re.compile(r'^\s*-\@([A-Za-z0-9_]{5,32})\s*$', re.IGNORECASE)),
+            filters.Regex(re.compile(r'^\s*-@([A-Za-z0-9_]{5,32})\s*$', re.IGNORECASE)),
             specific_user_trigger
         )
     ],
@@ -1550,12 +1566,12 @@ team_conv_handler = ConversationHandler(
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)
         ],
         SELECT_ROLE: [
-            CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')
+            CallbackQueryHandler(select_role_handler, pattern='^role:.$|^cancel_role_selection$')
         ],
         CONFIRMATION: [
             CallbackQueryHandler(
                 confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
+                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).'
             )
         ],
     },
@@ -1590,12 +1606,12 @@ general_conv_handler = ConversationHandler(
     ],
     states={
         SELECT_ROLE: [
-            CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')
+            CallbackQueryHandler(select_role_handler, pattern='^role:.$|^cancel_role_selection$')
         ],
         CONFIRMATION: [
             CallbackQueryHandler(
                 confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
+                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).'
             )
         ],
     },
@@ -1651,14 +1667,14 @@ lecture_test_conv_handler = ConversationHandler(
     allow_reentry=True,
 )
 
-# ------------------ Error Handler ------------------
+------------------ Error Handler ------------------
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Exception while handling an update: {context.error}", exc_info=True)
     if isinstance(update, Update) and update.message:
         await update.message.reply_text("An error occurred. Please try again later.")
 
-# ------------------ Main Function ------------------
+------------------ Main Function ------------------
 
 def main():
     BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -1705,5 +1721,5 @@ def main():
     logger.info("Bot started polling...")
     application.run_polling()
 
-if __name__ == '__main__':
+if name == 'main':
     main()
