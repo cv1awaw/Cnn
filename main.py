@@ -65,8 +65,7 @@ ROLE_DISPLAY_NAMES = {
     'group_assistant': 'Group Assistant',
 }
 
-Define trigger to target roles mapping for Tara Team side commands
-
+# Define trigger to target roles mapping for Tara Team side commands
 TRIGGER_TARGET_MAP = {
     '-w': ['writer'],
     '-e': ['checker_team'],
@@ -77,8 +76,7 @@ TRIGGER_TARGET_MAP = {
     '-c': ['checker_team'],
 }
 
-Updated forwarding rules
-
+# Updated forwarding rules
 SENDING_ROLE_TARGETS = {
     'writer': ['mcqs_team', 'checker_team', 'tara_team'],
     'mcqs_team': ['design_team', 'tara_team'],
@@ -113,8 +111,7 @@ TARA_MESSAGE = 4
 CONFIRMATION = 5
 SELECT_ROLE = 6
 
-LECTURE FEATURE STATES
-
+# LECTURE FEATURE STATES
 LECTURE_SUBJECT = 90
 LECTURE_ENTER_COUNT = 100
 LECTURE_CONFIRM = 101
@@ -123,8 +120,7 @@ LECTURE_EDIT = 103
 LECTURE_FINISH = 104
 
 #------------------ Global Variables for Lecture Feature ------------------
-
-These globals are used so that lecture data is shared across all users.
+# These globals are used so that lecture data is shared across all users.
 
 LECTURE_STORE = {}         # { lecture_num: { "slots": {slot: [registrations]}, "group_number": ..., "note": ... } }
 LECTURE_BROADCAST = {}     # { lecture_num: [ { "chat_id": ..., "message_id": ... }, ... ] }
@@ -132,16 +128,14 @@ GLOBAL_LECTURE_SUBJECT = None
 GLOBAL_LECTURE_COUNT = 0
 
 #------------------ Global Variables for Lecture Test Feature ------------------
-
-These are used for testing purposes (allowed only for testers).
+# These are used for testing purposes (allowed only for testers).
 
 TEST_LECTURE_STORE = {}
 TEST_LECTURE_BROADCAST = {}
 TEST_GLOBAL_LECTURE_SUBJECT = None
 TEST_GLOBAL_LECTURE_COUNT = 0
 
-Global set to store tester IDs. Use the /addtester command to add a tester.
-
+# Global set to store tester IDs. Use the /addtester command to add a tester.
 TESTER_IDS = set()
 
 #------------------ User Data Storage ------------------
@@ -345,8 +339,6 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
 
 #------------------ Lecture Feature (Admin Only) ------------------
 
-These functions handle lecture creation and registration.
-
 async def broadcast_lecture_info(lecture_num, context: ContextTypes.DEFAULT_TYPE):
     text = await build_lecture_text(lecture_num, context, test_mode=False)
     markup = build_lecture_keyboard(lecture_num, context, test_mode=False)
@@ -482,8 +474,7 @@ async def lecture_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Lecture messages have been broadcast to all teams.")
     return LECTURE_SETUP
 
-Inline callback for lecture (both register/withdraw/update)
-
+# Inline callback for lecture (both register/withdraw/update)
 async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -512,68 +503,68 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("Registered successfully.", show_alert=True)
         return
 
-    elif data.startswith("lecture_withdraw:"):  
-        try:  
-            _, lec_str, slot = data.split(":")  
-            lecture_num = int(lec_str)  
-        except ValueError:  
-            await query.answer("Invalid data.", show_alert=True)  
-            return  
-        user = query.from_user  
-        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE  
-        if lecture_num not in store:  
-            await query.answer("Lecture not found.", show_alert=True)  
-            return  
-        registrations = store[lecture_num]["slots"].get(slot, [])  
-        new_regs = [reg for reg in registrations if reg["user_id"] != user.id]  
-        if len(new_regs) == len(registrations):  
-            await query.answer("You are not registered in this slot.", show_alert=True)  
-            return  
-        store[lecture_num]["slots"][slot] = new_regs  
-        await update_broadcast(lecture_num, context, test_mode=test_mode)  
-        await query.answer("Withdrawn successfully.", show_alert=True)  
-        return  
+    elif data.startswith("lecture_withdraw:"):    
+        try:    
+            _, lec_str, slot = data.split(":")    
+            lecture_num = int(lec_str)    
+        except ValueError:    
+            await query.answer("Invalid data.", show_alert=True)    
+            return    
+        user = query.from_user    
+        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE    
+        if lecture_num not in store:    
+            await query.answer("Lecture not found.", show_alert=True)    
+            return    
+        registrations = store[lecture_num]["slots"].get(slot, [])    
+        new_regs = [reg for reg in registrations if reg["user_id"] != user.id]    
+        if len(new_regs) == len(registrations):    
+            await query.answer("You are not registered in this slot.", show_alert=True)    
+            return    
+        store[lecture_num]["slots"][slot] = new_regs    
+        await update_broadcast(lecture_num, context, test_mode=test_mode)    
+        await query.answer("Withdrawn successfully.", show_alert=True)    
+        return    
 
-    elif data.startswith("lecture_updatenote:"):  
-        try:  
-            _, lec_str, slot = data.split(":")  
-            lecture_num = int(lec_str)  
-        except ValueError:  
-            await query.answer("Invalid data.", show_alert=True)  
-            return  
-        user = query.from_user  
-        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE  
-        if lecture_num not in store:  
-            await query.answer("Lecture not found.", show_alert=True)  
-            return  
-        registrations = store[lecture_num]["slots"].get(slot, [])  
-        if not any(reg["user_id"] == user.id for reg in registrations):  
-            await query.answer("You are not registered in this slot.", show_alert=True)  
-            return  
-        context.user_data["lecture_updatenote_pending"] = {"lecture_num": lecture_num, "slot": slot, "user_id": user.id, "test_mode": test_mode}  
-        await query.message.reply_text(f"Please enter your new note for the {slot} slot in Lecture #{lecture_num}:")  
-        return  
+    elif data.startswith("lecture_updatenote:"):    
+        try:    
+            _, lec_str, slot = data.split(":")    
+            lecture_num = int(lec_str)    
+        except ValueError:    
+            await query.answer("Invalid data.", show_alert=True)    
+            return    
+        user = query.from_user    
+        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE    
+        if lecture_num not in store:    
+            await query.answer("Lecture not found.", show_alert=True)    
+            return    
+        registrations = store[lecture_num]["slots"].get(slot, [])    
+        if not any(reg["user_id"] == user.id for reg in registrations):    
+            await query.answer("You are not registered in this slot.", show_alert=True)    
+            return    
+        context.user_data["lecture_updatenote_pending"] = {"lecture_num": lecture_num, "slot": slot, "user_id": user.id, "test_mode": test_mode}    
+        await query.message.reply_text(f"Please enter your new note for the {slot} slot in Lecture #{lecture_num}:")    
+        return    
 
-    elif data.startswith("lecture_setgroup:"):  
-        try:  
-            _, lec_str = data.split(":")  
-            lecture_num = int(lec_str)  
-        except ValueError:  
-            await query.answer("Invalid data.", show_alert=True)  
-            return  
-        context.user_data["lecture_setgroup_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}  
-        await query.message.reply_text(f"Please enter the group number for Lecture #{lecture_num}:")  
-        return  
+    elif data.startswith("lecture_setgroup:"):    
+        try:    
+            _, lec_str = data.split(":")    
+            lecture_num = int(lec_str)    
+        except ValueError:    
+            await query.answer("Invalid data.", show_alert=True)    
+            return    
+        context.user_data["lecture_setgroup_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}    
+        await query.message.reply_text(f"Please enter the group number for Lecture #{lecture_num}:")    
+        return    
 
-    elif data.startswith("lecture_setnote:"):  
-        try:  
-            _, lec_str = data.split(":")  
-            lecture_num = int(lec_str)  
-        except ValueError:  
-            await query.answer("Invalid data.", show_alert=True)  
-            return  
-        context.user_data["lecture_setnote_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}  
-        await query.message.reply_text(f"Please enter the global note for Lecture #{lecture_num}:")  
+    elif data.startswith("lecture_setnote:"):    
+        try:    
+            _, lec_str = data.split(":")    
+            lecture_num = int(lec_str)    
+        except ValueError:    
+            await query.answer("Invalid data.", show_alert=True)    
+            return    
+        context.user_data["lecture_setnote_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}    
+        await query.message.reply_text(f"Please enter the global note for Lecture #{lecture_num}:")    
         return
 
 async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -645,8 +636,6 @@ async def lecture_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 #------------------ Lecture Test Feature (Tester Only) ------------------
-
-These functions are analogous to the lecture functions above but allow testers to create test lectures.
 
 async def lecture_test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -763,7 +752,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     data = query.data
     if data.startswith('confirm_no_role:'):
         try:
-            , confirmation_uuid = data.split(':', 1)
+            _, confirmation_uuid = data.split(':', 1)
         except ValueError:
             await query.edit_message_text("Invalid confirmation data. Please try again.")
             return ConversationHandler.END
@@ -846,10 +835,10 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 await query.edit_message_text("Operation cancelled.")
                 if f'confirm_{confirmation_uuid}' in context.user_data:
                     del context.user_data[f'confirm_{confirmation_uuid}']
-                return ConversationHandler.END
+            return ConversationHandler.END
     if data.startswith("confirm_userid:"):
         try:
-            , confirmation_uuid = data.split(':', 1)
+            _, confirmation_uuid = data.split(':', 1)
         except ValueError:
             await query.edit_message_text("Invalid confirmation data. Please try again.")
             return ConversationHandler.END
@@ -883,7 +872,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
     elif data.startswith("cancel_userid:"):
         try:
-            , confirmation_uuid = data.split(':', 1)
+            _, confirmation_uuid = data.split(':', 1)
         except ValueError:
             await query.edit_message_text("Invalid confirmation data. Please try again.")
             return ConversationHandler.END
