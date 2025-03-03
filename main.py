@@ -494,6 +494,23 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         if lecture_num not in store:
             await query.answer("Lecture not found.", show_alert=True)
             return
+        # تحقق من صلاحية المستخدم للتسجيل في هذا السلاح (مثلاً: writer فقط للكتّاب، editor للمحررين، وهكذا)
+        user_roles = get_user_roles(user.id)
+        allowed = False
+        if slot == "writer" and "writer" in user_roles:
+            allowed = True
+        elif slot == "editor" and "checker_team" in user_roles:
+            allowed = True
+        elif slot == "mcq" and "mcqs_team" in user_roles:
+            allowed = True
+        elif slot == "design" and "design_team" in user_roles:
+            allowed = True
+        elif slot == "digital_writer" and "word_team" in user_roles:
+            allowed = True
+        if not allowed:
+            await query.answer("You are not authorized to register for this slot.", show_alert=True)
+            return
+
         registrations = store[lecture_num]["slots"].get(slot, [])
         if any(reg["user_id"] == user.id for reg in registrations):
             await query.answer("You are already registered in this slot.", show_alert=True)
@@ -929,7 +946,8 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
     if 'tara_team' not in roles:
         await update.message.reply_text("You are not authorized to use this command.")
         return ConversationHandler.END
-    message_text = update.message.text.strip().lower()
+    # تعديل بسيط لإزالة النقطة في حال وجودها في الأمر
+    message_text = update.message.text.strip().lower().rstrip('.')
     target_roles = TRIGGER_TARGET_MAP.get(message_text)
     if not target_roles:
         await update.message.reply_text("Invalid trigger. Please try again.")
@@ -1532,7 +1550,7 @@ specific_user_conv_handler = ConversationHandler(
 
 specific_team_conv_handler = ConversationHandler(
     entry_points=[
-        MessageHandler(filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|c)$', re.IGNORECASE)), specific_team_trigger)
+        MessageHandler(filters.Regex(re.compile(r'^\s*-(w|e|mcq|d|de|mf|c)\.?\s*$', re.IGNORECASE)), specific_team_trigger)
     ],
     states={
         SPECIFIC_TEAM_MESSAGE: [
