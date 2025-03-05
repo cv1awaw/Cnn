@@ -30,8 +30,7 @@ from roles import (
 #------------------ Setup Logging ------------------
 
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -120,16 +119,16 @@ LECTURE_EDIT = 103
 LECTURE_FINISH = 104
 
 #------------------ Global Variables for Lecture Feature ------------------
-# These globals are used so that lecture data is shared across all users.
 
+# These globals are used so that lecture data is shared across all users.
 LECTURE_STORE = {}         # { lecture_num: { "slots": {slot: [registrations]}, "group_number": ..., "note": ... } }
 LECTURE_BROADCAST = {}     # { lecture_num: [ { "chat_id": ..., "message_id": ... }, ... ] }
 GLOBAL_LECTURE_SUBJECT = None
 GLOBAL_LECTURE_COUNT = 0
 
 #------------------ Global Variables for Lecture Test Feature ------------------
-# These are used for testing purposes (allowed only for testers).
 
+# These are used for testing purposes (allowed only for testers).
 TEST_LECTURE_STORE = {}
 TEST_LECTURE_BROADCAST = {}
 TEST_GLOBAL_LECTURE_SUBJECT = None
@@ -236,12 +235,13 @@ def get_confirmation_keyboard(uuid_str):
     return InlineKeyboardMarkup(keyboard)
 
 def get_role_selection_keyboard(roles):
-    keyboard = []
+    # تعديل: عرض كل الأدوار في صف واحد مع زر إلغاء واحد فقط أسفلهم.
+    buttons = []
     for role in roles:
         display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
         callback_data = f"role:{role}"
-        keyboard.append([InlineKeyboardButton(display_name, callback_data=callback_data)])
-        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_role_selection')])
+        buttons.append(InlineKeyboardButton(display_name, callback_data=callback_data))
+    keyboard = [buttons, [InlineKeyboardButton("❌ Cancel", callback_data='cancel_role_selection')]]
     return InlineKeyboardMarkup(keyboard)
 
 async def forward_message(bot, message, target_ids, sender_role):
@@ -394,8 +394,8 @@ async def build_lecture_text(lecture_num, context: ContextTypes.DEFAULT_TYPE, te
         if not registrations:
             line = f"{slot_titles[slot]} - Not Assigned"
         else:
-            # Use stored display name if available
-            names = [reg.get("display_name", f"ID {reg['user_id']}") for reg in registrations]
+            # استخدام display_name المخزنة فقط (اليوزر نيم والاسم فقط)
+            names = [reg["display_name"] for reg in registrations]
             line = f"{slot_titles[slot]} - " + ", ".join(names)
         lines.append(line)
     group_number = lecture_info.get("group_number") or "Not Set"
@@ -474,7 +474,6 @@ async def lecture_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Lecture messages have been broadcast to all teams.")
     return LECTURE_SETUP
 
-# Inline callback for lecture (both register/withdraw/update)
 async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -494,7 +493,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         if lecture_num not in store:
             await query.answer("Lecture not found.", show_alert=True)
             return
-        # تحقق من صلاحية المستخدم للتسجيل في هذا السلاح (مثلاً: writer فقط للكتّاب، editor للمحررين، وهكذا)
+        # تحقق من صلاحية المستخدم للتسجيل في هذا الس slot
         user_roles = get_user_roles(user.id)
         allowed = False
         if slot == "writer" and "writer" in user_roles:
@@ -515,73 +514,82 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         if any(reg["user_id"] == user.id for reg in registrations):
             await query.answer("You are already registered in this slot.", show_alert=True)
             return
-        registrations.append({"user_id": user.id, "display_name": get_display_name(user), "note": ""})
+        registrations.append({
+            "user_id": user.id,
+            "display_name": get_display_name(user),
+            "note": ""
+        })
         await update_broadcast(lecture_num, context, test_mode=test_mode)
         await query.answer("Registered successfully.", show_alert=True)
         return
 
-    elif data.startswith("lecture_withdraw:"):    
-        try:    
-            _, lec_str, slot = data.split(":")    
-            lecture_num = int(lec_str)    
-        except ValueError:    
-            await query.answer("Invalid data.", show_alert=True)    
-            return    
-        user = query.from_user    
-        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE    
-        if lecture_num not in store:    
-            await query.answer("Lecture not found.", show_alert=True)    
-            return    
-        registrations = store[lecture_num]["slots"].get(slot, [])    
-        new_regs = [reg for reg in registrations if reg["user_id"] != user.id]    
-        if len(new_regs) == len(registrations):    
-            await query.answer("You are not registered in this slot.", show_alert=True)    
-            return    
-        store[lecture_num]["slots"][slot] = new_regs    
-        await update_broadcast(lecture_num, context, test_mode=test_mode)    
-        await query.answer("Withdrawn successfully.", show_alert=True)    
-        return    
+    elif data.startswith("lecture_withdraw:"):
+        try:
+            _, lec_str, slot = data.split(":")
+            lecture_num = int(lec_str)
+        except ValueError:
+            await query.answer("Invalid data.", show_alert=True)
+            return
+        user = query.from_user
+        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
+        if lecture_num not in store:
+            await query.answer("Lecture not found.", show_alert=True)
+            return
+        registrations = store[lecture_num]["slots"].get(slot, [])
+        new_regs = [reg for reg in registrations if reg["user_id"] != user.id]
+        if len(new_regs) == len(registrations):
+            await query.answer("You are not registered in this slot.", show_alert=True)
+            return
+        store[lecture_num]["slots"][slot] = new_regs
+        await update_broadcast(lecture_num, context, test_mode=test_mode)
+        await query.answer("Withdrawn successfully.", show_alert=True)
+        return
 
-    elif data.startswith("lecture_updatenote:"):    
-        try:    
-            _, lec_str, slot = data.split(":")    
-            lecture_num = int(lec_str)    
-        except ValueError:    
-            await query.answer("Invalid data.", show_alert=True)    
-            return    
-        user = query.from_user    
-        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE    
-        if lecture_num not in store:    
-            await query.answer("Lecture not found.", show_alert=True)    
-            return    
-        registrations = store[lecture_num]["slots"].get(slot, [])    
-        if not any(reg["user_id"] == user.id for reg in registrations):    
-            await query.answer("You are not registered in this slot.", show_alert=True)    
-            return    
-        context.user_data["lecture_updatenote_pending"] = {"lecture_num": lecture_num, "slot": slot, "user_id": user.id, "test_mode": test_mode}    
-        await query.message.reply_text(f"Please enter your new note for the {slot} slot in Lecture #{lecture_num}:")    
-        return    
+    elif data.startswith("lecture_updatenote:"):
+        try:
+            _, lec_str, slot = data.split(":")
+            lecture_num = int(lec_str)
+        except ValueError:
+            await query.answer("Invalid data.", show_alert=True)
+            return
+        user = query.from_user
+        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
+        if lecture_num not in store:
+            await query.answer("Lecture not found.", show_alert=True)
+            return
+        registrations = store[lecture_num]["slots"].get(slot, [])
+        if not any(reg["user_id"] == user.id for reg in registrations):
+            await query.answer("You are not registered in this slot.", show_alert=True)
+            return
+        context.user_data["lecture_updatenote_pending"] = {
+            "lecture_num": lecture_num,
+            "slot": slot,
+            "user_id": user.id,
+            "test_mode": test_mode
+        }
+        await query.message.reply_text(f"Please enter your new note for the {slot} slot in Lecture #{lecture_num}:")
+        return
 
-    elif data.startswith("lecture_setgroup:"):    
-        try:    
-            _, lec_str = data.split(":")    
-            lecture_num = int(lec_str)    
-        except ValueError:    
-            await query.answer("Invalid data.", show_alert=True)    
-            return    
-        context.user_data["lecture_setgroup_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}    
-        await query.message.reply_text(f"Please enter the group number for Lecture #{lecture_num}:")    
-        return    
+    elif data.startswith("lecture_setgroup:"):
+        try:
+            _, lec_str = data.split(":")
+            lecture_num = int(lec_str)
+        except ValueError:
+            await query.answer("Invalid data.", show_alert=True)
+            return
+        context.user_data["lecture_setgroup_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}
+        await query.message.reply_text(f"Please enter the group number for Lecture #{lecture_num}:")
+        return
 
-    elif data.startswith("lecture_setnote:"):    
-        try:    
-            _, lec_str = data.split(":")    
-            lecture_num = int(lec_str)    
-        except ValueError:    
-            await query.answer("Invalid data.", show_alert=True)    
-            return    
-        context.user_data["lecture_setnote_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}    
-        await query.message.reply_text(f"Please enter the global note for Lecture #{lecture_num}:")    
+    elif data.startswith("lecture_setnote:"):
+        try:
+            _, lec_str = data.split(":")
+            lecture_num = int(lec_str)
+        except ValueError:
+            await query.answer("Invalid data.", show_alert=True)
+            return
+        context.user_data["lecture_setnote_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}
+        await query.message.reply_text(f"Please enter the global note for Lecture #{lecture_num}:")
         return
 
 async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -598,9 +606,10 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 if reg["user_id"] == pending["user_id"]:
                     reg["note"] = user_text
                     break
-            await update.message.reply_text(f"Note updated for your registration in the {slot} slot of Lecture #{lecture_num}.")
-            await update_broadcast(lecture_num, context, test_mode=test_mode)
-            return LECTURE_SETUP
+        await update.message.reply_text(f"Note updated for your registration in the {slot} slot of Lecture #{lecture_num}.")
+        await update_broadcast(lecture_num, context, test_mode=test_mode)
+        return LECTURE_SETUP
+
     if "lecture_setgroup_pending" in context.user_data:
         pending = context.user_data.pop("lecture_setgroup_pending")
         lecture_num = pending["lecture_num"]
@@ -608,9 +617,10 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
         store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
         if lecture_num in store:
             store[lecture_num]["group_number"] = user_text
-            await update.message.reply_text(f"Group number for Lecture #{lecture_num} set to: {user_text}")
-            await update_broadcast(lecture_num, context, test_mode=test_mode)
-            return LECTURE_SETUP
+        await update.message.reply_text(f"Group number for Lecture #{lecture_num} set to: {user_text}")
+        await update_broadcast(lecture_num, context, test_mode=test_mode)
+        return LECTURE_SETUP
+
     if "lecture_setnote_pending" in context.user_data:
         pending = context.user_data.pop("lecture_setnote_pending")
         lecture_num = pending["lecture_num"]
@@ -618,9 +628,10 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
         store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
         if lecture_num in store:
             store[lecture_num]["note"] = user_text
-            await update.message.reply_text(f"Global note for Lecture #{lecture_num} set to: {user_text}")
-            await update_broadcast(lecture_num, context, test_mode=test_mode)
-            return LECTURE_SETUP
+        await update.message.reply_text(f"Global note for Lecture #{lecture_num} set to: {user_text}")
+        await update_broadcast(lecture_num, context, test_mode=test_mode)
+        return LECTURE_SETUP
+
     return LECTURE_SETUP
 
 async def lecture_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -800,8 +811,9 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             await context.bot.send_message(chat_id=special_user_id, text=info_message, parse_mode='Markdown')
         except Exception as e:
             logger.error(f"Failed to send real info to user {special_user_id}: {e}")
-        del context.user_data[f'confirm_{confirmation_uuid}']
+        del context.user_data[f'confirm{confirmation_uuid}']
         return ConversationHandler.END
+
     if data.startswith('confirm:') or data.startswith('cancel:'):
         try:
             action, confirmation_uuid = data.split(':', 1)
@@ -828,9 +840,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                         except:
                             recipient_display_names.append(str(tid))
                 else:
-                    recipient_display_names = [
-                        ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles if r != 'specific_user'
-                    ]
+                    recipient_display_names = [ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in target_roles if r != 'specific_user']
                 if message_to_send.document:
                     confirmation_text = (
                         f"✅ Your PDF {message_to_send.document.file_name} has been sent "
@@ -849,10 +859,11 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 await query.edit_message_text(confirmation_text, parse_mode='Markdown')
                 del context.user_data[f'confirm_{confirmation_uuid}']
             elif action == 'cancel':
-                await query.edit_message_text("Operation cancelled.")
+                await query.edit_message_text("Operation cancelled.", reply_markup=None)
                 if f'confirm_{confirmation_uuid}' in context.user_data:
                     del context.user_data[f'confirm_{confirmation_uuid}']
             return ConversationHandler.END
+
     if data.startswith("confirm_userid:"):
         try:
             _, confirmation_uuid = data.split(':', 1)
@@ -885,8 +896,9 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.error(f"Failed to send message to user {target_id}: {e}")
             await query.edit_message_text("❌ Failed to send message.", parse_mode='Markdown')
             await reply_message.reply_text("didn't sent")
-        del context.user_data[f'confirm_userid_{confirmation_uuid}']
+        del context.user_data[f'confirm_userid{confirmation_uuid}']
         return ConversationHandler.END
+
     elif data.startswith("cancel_userid:"):
         try:
             _, confirmation_uuid = data.split(':', 1)
@@ -894,7 +906,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.edit_message_text("Invalid confirmation data. Please try again.")
             return ConversationHandler.END
         if f'confirm_userid{confirmation_uuid}' in context.user_data:
-            del context.user_data[f'confirm_userid_{confirmation_uuid}']
+            del context.user_data[f'confirm_userid{confirmation_uuid}']
         await query.edit_message_text("Operation cancelled.")
         return ConversationHandler.END
     else:
@@ -1042,13 +1054,13 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.edit_message_text("No recipients found to send your message.")
             return ConversationHandler.END
         await send_confirmation(pending_message, context, selected_role, list(target_ids), target_roles=target_roles)
-        await query.edit_message_text("Processing your message...")
+        await query.edit_message_text("Processing your message...", reply_markup=None)
         return CONFIRMATION
     elif data == 'cancel_role_selection':
-        await query.edit_message_text("Operation cancelled.")
+        await query.edit_message_text("Operation cancelled.", reply_markup=None)
         return ConversationHandler.END
     else:
-        await query.edit_message_text("Invalid role selection.")
+        await query.edit_message_text("Invalid role selection.", reply_markup=None)
         return ConversationHandler.END
 
 async def tara_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1281,10 +1293,7 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_lines = []
     for username, uid in user_data_store.items():
         user_roles = get_user_roles(uid)
-        if user_roles:
-            roles_display = ", ".join(ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in user_roles)
-        else:
-            roles_display = "No role"
+        roles_display = ", ".join(ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in user_roles) if user_roles else "No role"
         user_lines.append(f"@{username} => {uid} (Roles: {roles_display})")
     user_list = "\n".join(user_lines)
     await update.message.reply_text(
@@ -1479,10 +1488,7 @@ async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(f"No record found for user ID {check_id}.", parse_mode='Markdown')
         return
     roles = get_user_roles(check_id)
-    if roles:
-        roles_display = ", ".join(ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in roles)
-    else:
-        roles_display = "No role (anonymous feedback user)."
+    roles_display = ", ".join(ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in roles) if roles else "No role (anonymous feedback user)."
     await update.message.reply_text(
         f"User ID: {check_id}\nUsername: @{username_found}\nRoles: {roles_display}",
         parse_mode='Markdown'
@@ -1518,10 +1524,7 @@ user_id_conv_handler = ConversationHandler(
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, user_id_message_collector)
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(
-                confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
-            )
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1539,10 +1542,7 @@ specific_user_conv_handler = ConversationHandler(
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_user_message_handler)
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(
-                confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
-            )
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1550,17 +1550,14 @@ specific_user_conv_handler = ConversationHandler(
 
 specific_team_conv_handler = ConversationHandler(
     entry_points=[
-        MessageHandler(filters.Regex(re.compile(r'^\s*-(w|e|mcq|d|de|mf|c)\.?\s*$', re.IGNORECASE)), specific_team_trigger)
+        MessageHandler(filters.Regex(re.compile(r'^\s*-(w|e|mcq|d|de|mf|c).?\s*$', re.IGNORECASE)), specific_team_trigger)
     ],
     states={
         SPECIFIC_TEAM_MESSAGE: [
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, specific_team_message_handler)
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(
-                confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
-            )
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1573,13 +1570,10 @@ team_conv_handler = ConversationHandler(
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, team_message_handler)
         ],
         SELECT_ROLE: [
-            CallbackQueryHandler(select_role_handler, pattern='^role:.$|^cancel_role_selection$')
+            CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(
-                confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).'
-            )
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1592,10 +1586,7 @@ tara_conv_handler = ConversationHandler(
             MessageHandler((filters.TEXT | filters.Document.ALL) & ~filters.COMMAND, tara_message_handler)
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(
-                confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*'
-            )
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1604,22 +1595,16 @@ tara_conv_handler = ConversationHandler(
 general_conv_handler = ConversationHandler(
     entry_points=[
         MessageHandler(
-            (filters.TEXT | filters.Document.ALL)
-            & ~filters.COMMAND
-            & ~filters.Regex(re.compile(r'^-@'))
-            & ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team|user_id)$', re.IGNORECASE)),
+            (filters.TEXT | filters.Document.ALL) & ~filters.COMMAND & ~filters.Regex(re.compile(r'^-@')) & ~filters.Regex(re.compile(r'^-(w|e|mcq|d|de|mf|t|c|team|user_id)$', re.IGNORECASE)),
             handle_general_message
         )
     ],
     states={
         SELECT_ROLE: [
-            CallbackQueryHandler(select_role_handler, pattern='^role:.$|^cancel_role_selection$')
+            CallbackQueryHandler(select_role_handler, pattern='^role:.*$|^cancel_role_selection$')
         ],
         CONFIRMATION: [
-            CallbackQueryHandler(
-                confirmation_handler,
-                pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).'
-            )
+            CallbackQueryHandler(confirmation_handler, pattern='^(confirm:|cancel:|confirm_no_role:|confirm_userid:|cancel_userid:).*')
         ],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
@@ -1689,6 +1674,7 @@ def main():
         logger.error("BOT_TOKEN is not set in environment variables.")
         return
     application = ApplicationBuilder().token(BOT_TOKEN).build()
+
     # Standard command handlers
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('listusers', list_users))
@@ -1725,6 +1711,7 @@ def main():
     application.add_handler(tara_conv_handler)
     application.add_handler(general_conv_handler)
     application.add_error_handler(error_handler)
+
     logger.info("Bot started polling...")
     application.run_polling()
 
