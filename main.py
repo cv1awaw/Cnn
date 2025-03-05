@@ -235,13 +235,13 @@ def get_confirmation_keyboard(uuid_str):
     return InlineKeyboardMarkup(keyboard)
 
 def get_role_selection_keyboard(roles):
-    # تعديل: عرض كل الأدوار في صف واحد مع زر إلغاء واحد فقط أسفلهم.
-    buttons = []
+    # تعديل: عرض كل زر في صف منفصل حتى يظهر النص كاملًا
+    keyboard = []
     for role in roles:
         display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
         callback_data = f"role:{role}"
-        buttons.append(InlineKeyboardButton(display_name, callback_data=callback_data))
-    keyboard = [buttons, [InlineKeyboardButton("❌ Cancel", callback_data='cancel_role_selection')]]
+        keyboard.append([InlineKeyboardButton(display_name, callback_data=callback_data)])
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_role_selection')])
     return InlineKeyboardMarkup(keyboard)
 
 async def forward_message(bot, message, target_ids, sender_role):
@@ -493,7 +493,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         if lecture_num not in store:
             await query.answer("Lecture not found.", show_alert=True)
             return
-        # تحقق من صلاحية المستخدم للتسجيل في هذا الس slot
+        # تحقق من صلاحية المستخدم للتسجيل في هذا السلاح
         user_roles = get_user_roles(user.id)
         allowed = False
         if slot == "writer" and "writer" in user_roles:
