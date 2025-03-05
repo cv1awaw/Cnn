@@ -394,9 +394,15 @@ async def build_lecture_text(lecture_num, context: ContextTypes.DEFAULT_TYPE, te
         if not registrations:
             line = f"{slot_titles[slot]} - Not Assigned"
         else:
-            # استخدام display_name المخزنة فقط (اليوزر نيم والاسم فقط)
-            names = [reg["display_name"] for reg in registrations]
-            line = f"{slot_titles[slot]} - " + ", ".join(names)
+            # تعديل بسيط: إذا كان المُسجّل ليس هو الشخص الذي نفذ /lecture (admin id 6177929931)
+            admin_names = [reg["display_name"] for reg in registrations if reg["user_id"] == 6177929931]
+            non_admin_count = len([reg for reg in registrations if reg["user_id"] != 6177929931])
+            parts = []
+            if admin_names:
+                parts.append(", ".join(admin_names))
+            if non_admin_count > 0:
+                parts.append(f"{non_admin_count} anonymous")
+            line = f"{slot_titles[slot]} - " + " + ".join(parts)
         lines.append(line)
     group_number = lecture_info.get("group_number") or "Not Set"
     global_note = lecture_info.get("note") or "No note"
