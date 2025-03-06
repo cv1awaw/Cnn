@@ -121,8 +121,8 @@ LECTURE_FINISH = 104
 
 #------------------ Global Variables for Lecture Feature ------------------
 
-LECTURE_STORE = {}         
-LECTURE_BROADCAST = {}     
+LECTURE_STORE = {}         # { lecture_num: { "slots": {slot: [registrations]}, "group_number": ..., "note": ... } }
+LECTURE_BROADCAST = {}     # { lecture_num: [ { "chat_id": ..., "message_id": ... }, ... ] }
 GLOBAL_LECTURE_SUBJECT = None
 GLOBAL_LECTURE_COUNT = 0
 
@@ -218,9 +218,8 @@ def get_display_name(user):
         return "Unknown User"
     user_roles = get_user_roles(user.id)
     if user.username:
-        # هروب علامة _ يدويًا حتى لا يتم هروبها مرتين عند escape_markdown لاحقاً
-        username = user.username.replace('_', '\\_')
-        base_name = f"@{username}"
+        # لا نقوم بتعديل أو هروب اسم المستخدم؛ يُعاد كما هو
+        base_name = f"@{user.username}"
     else:
         base_name = f"{user.first_name}" + (f" {user.last_name}" if user.last_name else "")
     if 'group_admin' in user_roles or 'group_assistant' in user_roles:
@@ -248,7 +247,7 @@ def get_role_selection_keyboard(roles):
     return InlineKeyboardMarkup(keyboard)
 
 async def forward_message(bot, message, target_ids, sender_role):
-    # لا يتم هروب اسم المستخدم هنا حتى يظل بالشكل الصحيح
+    # يتم استخدام get_display_name دون هروب اسم المستخدم
     username_display = get_display_name(message.from_user)
     sender_display_name = escape_markdown(ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize()))
     if message.document:
@@ -270,7 +269,7 @@ async def forward_message(bot, message, target_ids, sender_role):
             elif message.text:
                 await bot.send_message(
                     chat_id=user_id,
-                    text=escape_markdown(f"{caption}\n\n{message.text}"),
+                    text=f"{caption}\n\n{escape_markdown(message.text)}",
                     parse_mode='Markdown'
                 )
                 logger.info(f"Forwarded text message to {user_id}")
@@ -1667,6 +1666,7 @@ def main():
     application.add_handler(CommandHandler('muteid', mute_id_command))
     application.add_handler(CommandHandler('unmuteid', unmute_id_command))
     application.add_handler(CommandHandler('listmuted', list_muted_command))
+    # /check and -check
     application.add_handler(CommandHandler('check', check_user_command))
     application.add_handler(
         MessageHandler(
@@ -1674,12 +1674,18 @@ def main():
             check_user_command
         )
     )
+    # Role management
     application.add_handler(CommandHandler('roleadd', roleadd_command))
     application.add_handler(CommandHandler('role_r', roleremove_command))
+    # New group name command
     application.add_handler(CommandHandler('setgroupname', set_group_name))
+    # New addtester command (admin only)
     application.add_handler(CommandHandler('addtester', add_tester_command))
+    # Lecture conversation (admin)
     application.add_handler(lecture_conv_handler)
+    # Lecture test conversation (testers only)
     application.add_handler(lecture_test_conv_handler)
+    # Conversation handlers
     application.add_handler(user_id_conv_handler)
     application.add_handler(specific_user_conv_handler)
     application.add_handler(specific_team_conv_handler)
