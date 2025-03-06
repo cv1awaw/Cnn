@@ -121,21 +121,19 @@ LECTURE_FINISH = 104
 
 #------------------ Global Variables for Lecture Feature ------------------
 
-# These globals are used so that lecture data is shared across all users.
-LECTURE_STORE = {}         # { lecture_num: { "slots": {slot: [registrations]}, "group_number": ..., "note": ... } }
-LECTURE_BROADCAST = {}     # { lecture_num: [ { "chat_id": ..., "message_id": ... }, ... ] }
+LECTURE_STORE = {}         
+LECTURE_BROADCAST = {}     
 GLOBAL_LECTURE_SUBJECT = None
 GLOBAL_LECTURE_COUNT = 0
 
 #------------------ Global Variables for Lecture Test Feature ------------------
 
-# These are used for testing purposes (allowed only for testers).
 TEST_LECTURE_STORE = {}
 TEST_LECTURE_BROADCAST = {}
 TEST_GLOBAL_LECTURE_SUBJECT = None
 TEST_GLOBAL_LECTURE_COUNT = 0
 
-# Global set to store tester IDs. Use the /addtester command to add a tester.
+# Global set to store tester IDs.
 TESTER_IDS = set()
 
 #------------------ User Data Storage ------------------
@@ -219,7 +217,12 @@ def get_display_name(user):
     if not user:
         return "Unknown User"
     user_roles = get_user_roles(user.id)
-    base_name = f"@{user.username}" if user.username else (f"{user.first_name} {user.last_name}" if user.last_name else user.first_name)
+    if user.username:
+        # هروب علامة _ يدويًا حتى لا يتم هروبها مرتين عند escape_markdown لاحقاً
+        username = user.username.replace('_', '\\_')
+        base_name = f"@{username}"
+    else:
+        base_name = f"{user.first_name}" + (f" {user.last_name}" if user.last_name else "")
     if 'group_admin' in user_roles or 'group_assistant' in user_roles:
         gname = get_group_name(user.id)
         if gname:
@@ -236,7 +239,6 @@ def get_confirmation_keyboard(uuid_str):
     return InlineKeyboardMarkup(keyboard)
 
 def get_role_selection_keyboard(roles):
-    # تعديل: عرض كل زر في صف منفصل حتى يظهر النص كاملًا
     keyboard = []
     for role in roles:
         display_name = ROLE_DISPLAY_NAMES.get(role, role.capitalize())
@@ -246,8 +248,9 @@ def get_role_selection_keyboard(roles):
     return InlineKeyboardMarkup(keyboard)
 
 async def forward_message(bot, message, target_ids, sender_role):
+    # لا يتم هروب اسم المستخدم هنا حتى يظل بالشكل الصحيح
+    username_display = get_display_name(message.from_user)
     sender_display_name = escape_markdown(ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize()))
-    username_display = escape_markdown(get_display_name(message.from_user))
     if message.document:
         caption = f"🔄 This document was sent by {username_display} ({sender_display_name})."
     elif message.text:
@@ -497,7 +500,6 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         if lecture_num not in store:
             await query.answer("Lecture not found.", show_alert=True)
             return
-        # تم إزالة شرط التحقق من صلاحية التسجيل حتى يتمكن أي أحد من التسجيل.
         registrations = store[lecture_num]["slots"].get(slot, [])
         if any(reg["user_id"] == user.id for reg in registrations):
             await query.answer("You are already registered in this slot.", show_alert=True)
@@ -698,7 +700,7 @@ async def lecture_test_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
             "group_number": None,
             "note": None,
         }
-        broadcast_msgs = await broadcast_lecture_info(i, context)  # reuse same broadcast function
+        broadcast_msgs = await broadcast_lecture_info(i, context)
         TEST_LECTURE_BROADCAST[i] = broadcast_msgs
     await update.message.reply_text("Test lecture messages have been broadcast to all teams.")
     return LECTURE_SETUP
@@ -735,7 +737,6 @@ async def lecture_test_finish(update: Update, context: ContextTypes.DEFAULT_TYPE
 #------------------ New Command: Add Tester (Admin Only) ------------------
 
 async def add_tester_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Only admin (user ID 6177929931) is allowed to add testers.
     if update.effective_user.id != 6177929931:
         await update.message.reply_text("You are not authorized to use this command.")
         return
@@ -1000,7 +1001,6 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     if not selected_role or not user_id:
         await message.reply_text("An error occurred. Please try again.")
         return ConversationHandler.END
-    # استخدام خريطة SENDING_ROLE_TARGETS لتحديد الرتب المُستقبلة
     target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
     target_ids = set()
     for role in target_roles:
@@ -1025,7 +1025,6 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.edit_message_text("An error occurred. Please try again.")
             return ConversationHandler.END
         del context.user_data['pending_message']
-        # استخدام دائماً SENDING_ROLE_TARGETS لتحديد الرتب المُستقبلة
         target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
         target_ids = set()
         for role in target_roles:
@@ -1668,7 +1667,6 @@ def main():
     application.add_handler(CommandHandler('muteid', mute_id_command))
     application.add_handler(CommandHandler('unmuteid', unmute_id_command))
     application.add_handler(CommandHandler('listmuted', list_muted_command))
-    # /check and -check
     application.add_handler(CommandHandler('check', check_user_command))
     application.add_handler(
         MessageHandler(
@@ -1676,18 +1674,12 @@ def main():
             check_user_command
         )
     )
-    # Role management
     application.add_handler(CommandHandler('roleadd', roleadd_command))
     application.add_handler(CommandHandler('role_r', roleremove_command))
-    # New group name command
     application.add_handler(CommandHandler('setgroupname', set_group_name))
-    # New addtester command (admin only)
     application.add_handler(CommandHandler('addtester', add_tester_command))
-    # Lecture conversation (admin)
     application.add_handler(lecture_conv_handler)
-    # Lecture test conversation (testers only)
     application.add_handler(lecture_test_conv_handler)
-    # Conversation handlers
     application.add_handler(user_id_conv_handler)
     application.add_handler(specific_user_conv_handler)
     application.add_handler(specific_team_conv_handler)
