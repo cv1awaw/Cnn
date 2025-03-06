@@ -126,16 +126,6 @@ LECTURE_BROADCAST = {}     # { lecture_num: [ { "chat_id": ..., "message_id": ..
 GLOBAL_LECTURE_SUBJECT = None
 GLOBAL_LECTURE_COUNT = 0
 
-#------------------ Global Variables for Lecture Test Feature ------------------
-
-TEST_LECTURE_STORE = {}
-TEST_LECTURE_BROADCAST = {}
-TEST_GLOBAL_LECTURE_SUBJECT = None
-TEST_GLOBAL_LECTURE_COUNT = 0
-
-# Global set to store tester IDs.
-TESTER_IDS = set()
-
 #------------------ User Data Storage ------------------
 
 USER_DATA_FILE = Path('user_data.json')
@@ -343,8 +333,8 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
 #------------------ Lecture Feature (Admin Only) ------------------
 
 async def broadcast_lecture_info(lecture_num, context: ContextTypes.DEFAULT_TYPE):
-    text = await build_lecture_text(lecture_num, context, test_mode=False)
-    markup = build_lecture_keyboard(lecture_num, context, test_mode=False)
+    text = await build_lecture_text(lecture_num, context)
+    markup = build_lecture_keyboard(lecture_num)
     broadcast_ids = set()
     for ids in ROLE_MAP.values():
         broadcast_ids.update(ids)
@@ -362,11 +352,10 @@ async def broadcast_lecture_info(lecture_num, context: ContextTypes.DEFAULT_TYPE
             logger.error(f"Failed to send broadcast lecture message to {uid}: {e}")
     return broadcast_messages
 
-async def update_broadcast(lecture_num, context: ContextTypes.DEFAULT_TYPE, test_mode=False):
-    text = await build_lecture_text(lecture_num, context, test_mode=test_mode)
-    markup = build_lecture_keyboard(lecture_num, context, test_mode=test_mode)
-    store = TEST_LECTURE_BROADCAST if test_mode else LECTURE_BROADCAST
-    broadcast_list = store.get(lecture_num, [])
+async def update_broadcast(lecture_num, context: ContextTypes.DEFAULT_TYPE):
+    text = await build_lecture_text(lecture_num, context)
+    markup = build_lecture_keyboard(lecture_num)
+    broadcast_list = LECTURE_BROADCAST.get(lecture_num, [])
     for msg_info in broadcast_list:
         try:
             await context.bot.edit_message_text(
@@ -379,10 +368,8 @@ async def update_broadcast(lecture_num, context: ContextTypes.DEFAULT_TYPE, test
         except Exception as e:
             logger.error(f"Failed to update broadcast lecture message for lecture {lecture_num}: {e}")
 
-async def build_lecture_text(lecture_num, context: ContextTypes.DEFAULT_TYPE, test_mode=False):
-    store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
-    subject = TEST_GLOBAL_LECTURE_SUBJECT if test_mode else GLOBAL_LECTURE_SUBJECT
-    subject = subject if subject else "Subject"
+async def build_lecture_text(lecture_num, context: ContextTypes.DEFAULT_TYPE):
+    subject = GLOBAL_LECTURE_SUBJECT if GLOBAL_LECTURE_SUBJECT else "Subject"
     slot_titles = {
         "writer": "Writer",
         "editor": "Editor",
@@ -391,7 +378,7 @@ async def build_lecture_text(lecture_num, context: ContextTypes.DEFAULT_TYPE, te
         "digital_writer": "Digital Writer"
     }
     lines = [f"Lecture #{lecture_num}", f"{subject}"]
-    lecture_info = store.get(lecture_num, {})
+    lecture_info = LECTURE_STORE.get(lecture_num, {})
     for slot in ["writer", "editor", "mcq", "design", "digital_writer"]:
         registrations = lecture_info.get("slots", {}).get(slot, [])
         if not registrations:
@@ -412,17 +399,17 @@ async def build_lecture_text(lecture_num, context: ContextTypes.DEFAULT_TYPE, te
     lines.append(f"Note - {global_note}")
     return "\n".join(lines)
 
-def build_lecture_keyboard(lecture_num, context: ContextTypes.DEFAULT_TYPE, test_mode=False):
+def build_lecture_keyboard(lecture_num):
     keyboard = []
     for slot in ["writer", "editor", "mcq", "design", "digital_writer"]:
         keyboard.append([
-            InlineKeyboardButton("Register", callback_data=f"lecture_sign:{lecture_num}:{slot}{':test' if test_mode else ''}"),
-            InlineKeyboardButton("Withdraw", callback_data=f"lecture_withdraw:{lecture_num}:{slot}{':test' if test_mode else ''}"),
-            InlineKeyboardButton("Note", callback_data=f"lecture_updatenote:{lecture_num}:{slot}{':test' if test_mode else ''}")
+            InlineKeyboardButton("Register", callback_data=f"lecture_sign:{lecture_num}:{slot}"),
+            InlineKeyboardButton("Withdraw", callback_data=f"lecture_withdraw:{lecture_num}:{slot}"),
+            InlineKeyboardButton("Note", callback_data=f"lecture_updatenote:{lecture_num}:{slot}")
         ])
     keyboard.append([
-        InlineKeyboardButton("Set Group", callback_data=f"lecture_setgroup:{lecture_num}{':test' if test_mode else ''}"),
-        InlineKeyboardButton("Set Global Note", callback_data=f"lecture_setnote:{lecture_num}{':test' if test_mode else ''}")
+        InlineKeyboardButton("Set Group", callback_data=f"lecture_setgroup:{lecture_num}"),
+        InlineKeyboardButton("Set Global Note", callback_data=f"lecture_setnote:{lecture_num}")
     ])
     return InlineKeyboardMarkup(keyboard)
 
@@ -484,9 +471,6 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await query.answer()
     data = query.data
-    test_mode = data.endswith(":test")
-    if test_mode:
-        data = data.replace(":test", "")
     if data.startswith("lecture_sign:"):
         try:
             _, lec_str, slot = data.split(":")
@@ -495,7 +479,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.answer("Invalid data.", show_alert=True)
             return
         user = query.from_user
-        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
+        store = LECTURE_STORE
         if lecture_num not in store:
             await query.answer("Lecture not found.", show_alert=True)
             return
@@ -508,7 +492,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
             "display_name": get_display_name(user),
             "note": ""
         })
-        await update_broadcast(lecture_num, context, test_mode=test_mode)
+        await update_broadcast(lecture_num, context)
         await query.answer("Registered successfully.", show_alert=True)
         return
 
@@ -520,7 +504,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.answer("Invalid data.", show_alert=True)
             return
         user = query.from_user
-        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
+        store = LECTURE_STORE
         if lecture_num not in store:
             await query.answer("Lecture not found.", show_alert=True)
             return
@@ -530,7 +514,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.answer("You are not registered in this slot.", show_alert=True)
             return
         store[lecture_num]["slots"][slot] = new_regs
-        await update_broadcast(lecture_num, context, test_mode=test_mode)
+        await update_broadcast(lecture_num, context)
         await query.answer("Withdrawn successfully.", show_alert=True)
         return
 
@@ -542,7 +526,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.answer("Invalid data.", show_alert=True)
             return
         user = query.from_user
-        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
+        store = LECTURE_STORE
         if lecture_num not in store:
             await query.answer("Lecture not found.", show_alert=True)
             return
@@ -553,8 +537,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         context.user_data["lecture_updatenote_pending"] = {
             "lecture_num": lecture_num,
             "slot": slot,
-            "user_id": user.id,
-            "test_mode": test_mode
+            "user_id": user.id
         }
         await query.message.reply_text(escape_markdown(f"Please enter your new note for the {slot} slot in Lecture #{lecture_num}:"), parse_mode='Markdown')
         return
@@ -566,7 +549,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         except ValueError:
             await query.answer("Invalid data.", show_alert=True)
             return
-        context.user_data["lecture_setgroup_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}
+        context.user_data["lecture_setgroup_pending"] = {"lecture_num": lecture_num}
         await query.message.reply_text(escape_markdown(f"Please enter the group number for Lecture #{lecture_num}:"), parse_mode='Markdown')
         return
 
@@ -577,7 +560,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         except ValueError:
             await query.answer("Invalid data.", show_alert=True)
             return
-        context.user_data["lecture_setnote_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}
+        context.user_data["lecture_setnote_pending"] = {"lecture_num": lecture_num}
         await query.message.reply_text(escape_markdown(f"Please enter the global note for Lecture #{lecture_num}:"), parse_mode='Markdown')
         return
 
@@ -587,8 +570,7 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
         pending = context.user_data.pop("lecture_updatenote_pending")
         lecture_num = pending["lecture_num"]
         slot = pending["slot"]
-        test_mode = pending.get("test_mode", False)
-        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
+        store = LECTURE_STORE
         if lecture_num in store:
             registrations = store[lecture_num]["slots"].get(slot, [])
             for reg in registrations:
@@ -596,29 +578,27 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     reg["note"] = user_text
                     break
         await update.message.reply_text(escape_markdown(f"Note updated for your registration in the {slot} slot of Lecture #{lecture_num}."), parse_mode='Markdown')
-        await update_broadcast(lecture_num, context, test_mode=test_mode)
+        await update_broadcast(lecture_num, context)
         return LECTURE_SETUP
 
     if "lecture_setgroup_pending" in context.user_data:
         pending = context.user_data.pop("lecture_setgroup_pending")
         lecture_num = pending["lecture_num"]
-        test_mode = pending.get("test_mode", False)
-        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
+        store = LECTURE_STORE
         if lecture_num in store:
             store[lecture_num]["group_number"] = user_text
         await update.message.reply_text(escape_markdown(f"Group number for Lecture #{lecture_num} set to: {user_text}"), parse_mode='Markdown')
-        await update_broadcast(lecture_num, context, test_mode=test_mode)
+        await update_broadcast(lecture_num, context)
         return LECTURE_SETUP
 
     if "lecture_setnote_pending" in context.user_data:
         pending = context.user_data.pop("lecture_setnote_pending")
         lecture_num = pending["lecture_num"]
-        test_mode = pending.get("test_mode", False)
-        store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
+        store = LECTURE_STORE
         if lecture_num in store:
             store[lecture_num]["note"] = user_text
         await update.message.reply_text(escape_markdown(f"Global note for Lecture #{lecture_num} set to: {user_text}"), parse_mode='Markdown')
-        await update_broadcast(lecture_num, context, test_mode=test_mode)
+        await update_broadcast(lecture_num, context)
         return LECTURE_SETUP
 
     return LECTURE_SETUP
@@ -651,104 +631,6 @@ async def lecture_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     LECTURE_BROADCAST.clear()
     GLOBAL_LECTURE_SUBJECT = None
     return ConversationHandler.END
-
-#------------------ Lecture Test Feature (Tester Only) ------------------
-
-async def lecture_test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not user or user.id not in TESTER_IDS:
-        await update.message.reply_text("You are not authorized to use /lecture_test.")
-        return ConversationHandler.END
-    await update.message.reply_text("Please enter the subject name for the test lectures (e.g. Test Subject):")
-    return LECTURE_SUBJECT
-
-async def lecture_test_subject_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global TEST_GLOBAL_LECTURE_SUBJECT
-    subject = update.message.text.strip()
-    if not subject:
-        await update.message.reply_text("Please enter a valid subject name.")
-        return LECTURE_SUBJECT
-    TEST_GLOBAL_LECTURE_SUBJECT = subject
-    await update.message.reply_text(escape_markdown(f"Test subject set as: {subject}\nNow, how many test lectures do you want to create? (1-50)"), parse_mode='Markdown')
-    return LECTURE_ENTER_COUNT
-
-async def lecture_test_enter_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global TEST_GLOBAL_LECTURE_COUNT
-    user_input = update.message.text.strip()
-    if not user_input.isdigit():
-        await update.message.reply_text("Please enter a valid number.")
-        return LECTURE_ENTER_COUNT
-    count = int(user_input)
-    if count < 1 or count > 50:
-        await update.message.reply_text("Please enter a number between 1 and 50.")
-        return LECTURE_ENTER_COUNT
-    TEST_GLOBAL_LECTURE_COUNT = count
-    await update.message.reply_text(escape_markdown(f"You entered {count} test lectures. Type /confirm_lecture to confirm or /cancel to cancel."), parse_mode='Markdown')
-    return LECTURE_CONFIRM
-
-async def lecture_test_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global TEST_LECTURE_STORE, TEST_LECTURE_BROADCAST, TEST_GLOBAL_LECTURE_COUNT, TEST_GLOBAL_LECTURE_SUBJECT
-    if TEST_GLOBAL_LECTURE_COUNT == 0:
-        await update.message.reply_text("No test lecture count found. Please use /lecture_test again.")
-        return ConversationHandler.END
-    TEST_LECTURE_STORE = {}
-    TEST_LECTURE_BROADCAST = {}
-    for i in range(1, TEST_GLOBAL_LECTURE_COUNT + 1):
-        TEST_LECTURE_STORE[i] = {
-            "slots": { key: [] for key in ["writer", "editor", "mcq", "design", "digital_writer"] },
-            "group_number": None,
-            "note": None,
-        }
-        broadcast_msgs = await broadcast_lecture_info(i, context)
-        TEST_LECTURE_BROADCAST[i] = broadcast_msgs
-    await update.message.reply_text("Test lecture messages have been broadcast to all teams.")
-    return LECTURE_SETUP
-
-async def lecture_test_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global TEST_LECTURE_STORE, TEST_LECTURE_BROADCAST, TEST_GLOBAL_LECTURE_COUNT, TEST_GLOBAL_LECTURE_SUBJECT
-    user = update.effective_user
-    if user.id not in TESTER_IDS:
-        await update.message.reply_text("You are not authorized to cancel test lecture creation.")
-        return ConversationHandler.END
-    TEST_GLOBAL_LECTURE_COUNT = 0
-    TEST_LECTURE_STORE.clear()
-    TEST_LECTURE_BROADCAST.clear()
-    TEST_GLOBAL_LECTURE_SUBJECT = None
-    await update.message.reply_text("Test lecture creation cancelled.")
-    return ConversationHandler.END
-
-async def lecture_test_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global TEST_LECTURE_STORE, TEST_LECTURE_BROADCAST, TEST_GLOBAL_LECTURE_COUNT, TEST_GLOBAL_LECTURE_SUBJECT
-    user = update.effective_user
-    if user.id not in TESTER_IDS:
-        await update.message.reply_text("You are not authorized to finish test lecture creation.")
-        return ConversationHandler.END
-    if not TEST_LECTURE_STORE:
-        await update.message.reply_text("No active test lectures to finish.")
-        return ConversationHandler.END
-    await update.message.reply_text("Test lecture creation completed. The broadcast messages remain updated.")
-    TEST_GLOBAL_LECTURE_COUNT = 0
-    TEST_LECTURE_STORE.clear()
-    TEST_LECTURE_BROADCAST.clear()
-    TEST_GLOBAL_LECTURE_SUBJECT = None
-    return ConversationHandler.END
-
-#------------------ New Command: Add Tester (Admin Only) ------------------
-
-async def add_tester_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != 6177929931:
-        await update.message.reply_text("You are not authorized to use this command.")
-        return
-    if len(context.args) != 1:
-        await update.message.reply_text("Usage: /addtester <user_id>")
-        return
-    try:
-        tester_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("Please provide a valid user ID.")
-        return
-    TESTER_IDS.add(tester_id)
-    await update.message.reply_text(f"Tester with user ID {tester_id} has been added.")
 
 #------------------ Other Handler Functions ------------------
 
@@ -1313,12 +1195,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Role Management (admin only):\n"
         f"/roleadd <user_id> <role_name> - Add a user to one of the following roles: {valid_roles}\n"
         f"/role_r <user_id> <role_name> - Remove a user from one of the above roles.\n\n"
-        "Tester Commands:\n"
-        "/addtester <user_id> - (Admin only) Add a user as a tester for lecture test mode.\n\n"
         "New Commands: \n"
         "/setgroupname <name> - (Group Admin / Group Assistant only) Assign a group name that appears next to your display name.\n"
-        "/lecture - (Only admin 6177929931 can start/cancel) Create multiple lectures with registration slots.\n"
-        "/lecture_test - (Testers only) Create test lectures to try out the lecture functionality."
+        "/lecture - (Only admin 6177929931 can start/cancel) Create multiple lectures with registration slots."
     )
     await update.message.reply_text(escape_markdown(help_text), parse_mode='Markdown')
 
@@ -1617,30 +1496,6 @@ lecture_conv_handler = ConversationHandler(
     allow_reentry=True,
 )
 
-lecture_test_conv_handler = ConversationHandler(
-    entry_points=[CommandHandler('lecture_test', lecture_test_command)],
-    states={
-        LECTURE_SUBJECT: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, lecture_test_subject_entry),
-        ],
-        LECTURE_ENTER_COUNT: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, lecture_test_enter_count),
-        ],
-        LECTURE_CONFIRM: [
-            CommandHandler('confirm_lecture', lecture_test_confirm),
-            CommandHandler('cancel', lecture_test_cancel)
-        ],
-        LECTURE_SETUP: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, lecture_text_entry),
-            CallbackQueryHandler(lecture_inline_callback, pattern=r'^(lecture_sign|lecture_withdraw|lecture_updatenote|lecture_setgroup|lecture_setnote):.*'),
-            CommandHandler('finish_lecture', lecture_test_finish),
-            CommandHandler('cancel', lecture_test_cancel),
-        ],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-    allow_reentry=True,
-)
-
 #------------------ Error Handler ------------------
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -1679,12 +1534,8 @@ def main():
     application.add_handler(CommandHandler('role_r', roleremove_command))
     # New group name command
     application.add_handler(CommandHandler('setgroupname', set_group_name))
-    # New addtester command (admin only)
-    application.add_handler(CommandHandler('addtester', add_tester_command))
     # Lecture conversation (admin)
     application.add_handler(lecture_conv_handler)
-    # Lecture test conversation (testers only)
-    application.add_handler(lecture_test_conv_handler)
     # Conversation handlers
     application.add_handler(user_id_conv_handler)
     application.add_handler(specific_user_conv_handler)
