@@ -394,7 +394,6 @@ async def build_lecture_text(lecture_num, context: ContextTypes.DEFAULT_TYPE, te
         if not registrations:
             line = f"{slot_titles[slot]} - Not Assigned"
         else:
-            # تعديل بسيط: إذا كان المُسجّل ليس هو الشخص الذي نفذ /lecture (admin id 6177929931)
             admin_names = [reg["display_name"] for reg in registrations if reg["user_id"] == 6177929931]
             non_admin_count = len([reg for reg in registrations if reg["user_id"] != 6177929931])
             parts = []
@@ -499,23 +498,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
         if lecture_num not in store:
             await query.answer("Lecture not found.", show_alert=True)
             return
-        # تحقق من صلاحية المستخدم للتسجيل في هذا السلاح
-        user_roles = get_user_roles(user.id)
-        allowed = False
-        if slot == "writer" and "writer" in user_roles:
-            allowed = True
-        elif slot == "editor" and "checker_team" in user_roles:
-            allowed = True
-        elif slot == "mcq" and "mcqs_team" in user_roles:
-            allowed = True
-        elif slot == "design" and "design_team" in user_roles:
-            allowed = True
-        elif slot == "digital_writer" and "word_team" in user_roles:
-            allowed = True
-        if not allowed:
-            await query.answer("You are not authorized to register for this slot.", show_alert=True)
-            return
-
+        # تم إزالة شرط التحقق من صلاحية التسجيل حتى يتمكن أي أحد من التسجيل.
         registrations = store[lecture_num]["slots"].get(slot, [])
         if any(reg["user_id"] == user.id for reg in registrations):
             await query.answer("You are already registered in this slot.", show_alert=True)
@@ -964,7 +947,6 @@ async def specific_team_trigger(update: Update, context: ContextTypes.DEFAULT_TY
     if 'tara_team' not in roles:
         await update.message.reply_text("You are not authorized to use this command.")
         return ConversationHandler.END
-    # تعديل بسيط لإزالة النقطة في حال وجودها في الأمر
     message_text = update.message.text.strip().lower().rstrip('.')
     target_roles = TRIGGER_TARGET_MAP.get(message_text)
     if not target_roles:
@@ -1021,7 +1003,8 @@ async def team_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     if not selected_role or not user_id:
         await message.reply_text("An error occurred. Please try again.")
         return ConversationHandler.END
-    target_roles = [selected_role, 'tara_team']
+    # استخدام خريطة SENDING_ROLE_TARGETS لتحديد الرتب المُستقبلة
+    target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
     target_ids = set()
     for role in target_roles:
         target_ids.update(ROLE_MAP.get(role, []))
@@ -1045,11 +1028,8 @@ async def select_role_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.edit_message_text("An error occurred. Please try again.")
             return ConversationHandler.END
         del context.user_data['pending_message']
-        command_text = pending_message.text.strip().lower() if pending_message.text else ""
-        if command_text == '-team':
-            target_roles = [selected_role, 'tara_team']
-        else:
-            target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
+        # استخدام دائماً SENDING_ROLE_TARGETS لتحديد الرتب المُستقبلة
+        target_roles = SENDING_ROLE_TARGETS.get(selected_role, [])
         target_ids = set()
         for role in target_roles:
             target_ids.update(ROLE_MAP.get(role, []))
