@@ -15,6 +15,7 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
 )
+from telegram.helpers import escape_markdown
 
 from roles import (
     WRITER_IDS,
@@ -245,8 +246,8 @@ def get_role_selection_keyboard(roles):
     return InlineKeyboardMarkup(keyboard)
 
 async def forward_message(bot, message, target_ids, sender_role):
-    sender_display_name = ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize())
-    username_display = get_display_name(message.from_user)
+    sender_display_name = escape_markdown(ROLE_DISPLAY_NAMES.get(sender_role, sender_role.capitalize()))
+    username_display = escape_markdown(get_display_name(message.from_user))
     if message.document:
         caption = f"🔄 This document was sent by {username_display} ({sender_display_name})."
     elif message.text:
@@ -259,14 +260,14 @@ async def forward_message(bot, message, target_ids, sender_role):
                 await bot.send_document(
                     chat_id=user_id,
                     document=message.document.file_id,
-                    caption=caption + (f"\n\n{message.caption}" if message.caption else ""),
+                    caption=escape_markdown(caption + (f"\n\n{message.caption}" if message.caption else "")),
                     parse_mode='Markdown'
                 )
                 logger.info(f"Forwarded document {message.document.file_id} to {user_id}")
             elif message.text:
                 await bot.send_message(
                     chat_id=user_id,
-                    text=f"{caption}\n\n{message.text}",
+                    text=escape_markdown(f"{caption}\n\n{message.text}"),
                     parse_mode='Markdown'
                 )
                 logger.info(f"Forwarded text message to {user_id}")
@@ -287,13 +288,13 @@ async def forward_anonymous_message(bot, message, target_ids):
                 await bot.send_document(
                     chat_id=user_id,
                     document=message.document.file_id,
-                    caption="🔄 Anonymous feedback." + (f"\n\n{message.caption}" if message.caption else ""),
+                    caption=escape_markdown("🔄 Anonymous feedback." + (f"\n\n{message.caption}" if message.caption else "")),
                     parse_mode='Markdown'
                 )
             elif message.text:
                 await bot.send_message(
                     chat_id=user_id,
-                    text=f"🔄 Anonymous feedback.\n\n{message.text}",
+                    text=escape_markdown(f"🔄 Anonymous feedback.\n\n{message.text}"),
                     parse_mode='Markdown'
                 )
             else:
@@ -329,7 +330,7 @@ async def send_confirmation(message, context, sender_role, target_ids, target_ro
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
+    await message.reply_text(escape_markdown(confirmation_text), parse_mode='Markdown', reply_markup=reply_markup)
     context.user_data[f'confirm_{confirmation_uuid}'] = {
         'message': message,
         'target_ids': target_ids,
@@ -350,7 +351,7 @@ async def broadcast_lecture_info(lecture_num, context: ContextTypes.DEFAULT_TYPE
         try:
             msg = await context.bot.send_message(
                 chat_id=uid,
-                text=text,
+                text=escape_markdown(text),
                 parse_mode='Markdown',
                 reply_markup=markup
             )
@@ -369,7 +370,7 @@ async def update_broadcast(lecture_num, context: ContextTypes.DEFAULT_TYPE, test
             await context.bot.edit_message_text(
                 chat_id=msg_info["chat_id"],
                 message_id=msg_info["message_id"],
-                text=text,
+                text=escape_markdown(text),
                 parse_mode='Markdown',
                 reply_markup=markup
             )
@@ -442,7 +443,7 @@ async def lecture_subject_entry(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("Please enter a valid subject name.")
         return LECTURE_SUBJECT
     GLOBAL_LECTURE_SUBJECT = subject
-    await update.message.reply_text(f"Subject set as: {subject}\nNow, how many lectures do you want to create? (1-50)")
+    await update.message.reply_text(escape_markdown(f"Subject set as: {subject}\nNow, how many lectures do you want to create? (1-50)"), parse_mode='Markdown')
     return LECTURE_ENTER_COUNT
 
 async def lecture_enter_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -456,9 +457,7 @@ async def lecture_enter_count(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Please enter a number between 1 and 50.")
         return LECTURE_ENTER_COUNT
     GLOBAL_LECTURE_COUNT = count
-    await update.message.reply_text(
-        f"You entered {count} lectures. Type /confirm_lecture to confirm or /cancel to cancel."
-    )
+    await update.message.reply_text(escape_markdown(f"You entered {count} lectures. Type /confirm_lecture to confirm or /cancel to cancel."), parse_mode='Markdown')
     return LECTURE_CONFIRM
 
 async def lecture_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -476,7 +475,7 @@ async def lecture_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         broadcast_msgs = await broadcast_lecture_info(i, context)
         LECTURE_BROADCAST[i] = broadcast_msgs
-    await update.message.reply_text("Lecture messages have been broadcast to all teams.")
+    await update.message.reply_text(escape_markdown("Lecture messages have been broadcast to all teams."), parse_mode='Markdown')
     return LECTURE_SETUP
 
 async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -556,7 +555,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
             "user_id": user.id,
             "test_mode": test_mode
         }
-        await query.message.reply_text(f"Please enter your new note for the {slot} slot in Lecture #{lecture_num}:")
+        await query.message.reply_text(escape_markdown(f"Please enter your new note for the {slot} slot in Lecture #{lecture_num}:"), parse_mode='Markdown')
         return
 
     elif data.startswith("lecture_setgroup:"):
@@ -567,7 +566,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.answer("Invalid data.", show_alert=True)
             return
         context.user_data["lecture_setgroup_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}
-        await query.message.reply_text(f"Please enter the group number for Lecture #{lecture_num}:")
+        await query.message.reply_text(escape_markdown(f"Please enter the group number for Lecture #{lecture_num}:"), parse_mode='Markdown')
         return
 
     elif data.startswith("lecture_setnote:"):
@@ -578,7 +577,7 @@ async def lecture_inline_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.answer("Invalid data.", show_alert=True)
             return
         context.user_data["lecture_setnote_pending"] = {"lecture_num": lecture_num, "test_mode": test_mode}
-        await query.message.reply_text(f"Please enter the global note for Lecture #{lecture_num}:")
+        await query.message.reply_text(escape_markdown(f"Please enter the global note for Lecture #{lecture_num}:"), parse_mode='Markdown')
         return
 
 async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -595,7 +594,7 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 if reg["user_id"] == pending["user_id"]:
                     reg["note"] = user_text
                     break
-        await update.message.reply_text(f"Note updated for your registration in the {slot} slot of Lecture #{lecture_num}.")
+        await update.message.reply_text(escape_markdown(f"Note updated for your registration in the {slot} slot of Lecture #{lecture_num}."), parse_mode='Markdown')
         await update_broadcast(lecture_num, context, test_mode=test_mode)
         return LECTURE_SETUP
 
@@ -606,7 +605,7 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
         store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
         if lecture_num in store:
             store[lecture_num]["group_number"] = user_text
-        await update.message.reply_text(f"Group number for Lecture #{lecture_num} set to: {user_text}")
+        await update.message.reply_text(escape_markdown(f"Group number for Lecture #{lecture_num} set to: {user_text}"), parse_mode='Markdown')
         await update_broadcast(lecture_num, context, test_mode=test_mode)
         return LECTURE_SETUP
 
@@ -617,7 +616,7 @@ async def lecture_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
         store = TEST_LECTURE_STORE if test_mode else LECTURE_STORE
         if lecture_num in store:
             store[lecture_num]["note"] = user_text
-        await update.message.reply_text(f"Global note for Lecture #{lecture_num} set to: {user_text}")
+        await update.message.reply_text(escape_markdown(f"Global note for Lecture #{lecture_num} set to: {user_text}"), parse_mode='Markdown')
         await update_broadcast(lecture_num, context, test_mode=test_mode)
         return LECTURE_SETUP
 
@@ -669,7 +668,7 @@ async def lecture_test_subject_entry(update: Update, context: ContextTypes.DEFAU
         await update.message.reply_text("Please enter a valid subject name.")
         return LECTURE_SUBJECT
     TEST_GLOBAL_LECTURE_SUBJECT = subject
-    await update.message.reply_text(f"Test subject set as: {subject}\nNow, how many test lectures do you want to create? (1-50)")
+    await update.message.reply_text(escape_markdown(f"Test subject set as: {subject}\nNow, how many test lectures do you want to create? (1-50)"), parse_mode='Markdown')
     return LECTURE_ENTER_COUNT
 
 async def lecture_test_enter_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -683,9 +682,7 @@ async def lecture_test_enter_count(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text("Please enter a number between 1 and 50.")
         return LECTURE_ENTER_COUNT
     TEST_GLOBAL_LECTURE_COUNT = count
-    await update.message.reply_text(
-        f"You entered {count} test lectures. Type /confirm_lecture to confirm or /cancel to cancel."
-    )
+    await update.message.reply_text(escape_markdown(f"You entered {count} test lectures. Type /confirm_lecture to confirm or /cancel to cancel."), parse_mode='Markdown')
     return LECTURE_CONFIRM
 
 async def lecture_test_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -758,7 +755,7 @@ async def add_tester_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.edit_message_text("Operation cancelled.")
+        await update.callback_query.edit_message_text(escape_markdown("Operation cancelled."), reply_markup=None, parse_mode='Markdown')
     else:
         await update.message.reply_text("Operation cancelled.")
     return ConversationHandler.END
@@ -771,11 +768,11 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             _, confirmation_uuid = data.split(':', 1)
         except ValueError:
-            await query.edit_message_text("Invalid confirmation data. Please try again.")
+            await query.edit_message_text(escape_markdown("Invalid confirmation data. Please try again."), parse_mode='Markdown')
             return ConversationHandler.END
         confirm_data = context.user_data.get(f'confirm{confirmation_uuid}')
         if not confirm_data:
-            await query.edit_message_text("An error occurred. Please try again.")
+            await query.edit_message_text(escape_markdown("An error occurred. Please try again."), parse_mode='Markdown')
             return ConversationHandler.END
         message_to_send = confirm_data['message']
         user_id = message_to_send.from_user.id
@@ -786,7 +783,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if user_id in all_target_ids:
             all_target_ids.remove(user_id)
         await forward_anonymous_message(context.bot, message_to_send, list(all_target_ids))
-        await query.edit_message_text("✅ Your anonymous feedback has been sent to all teams.", parse_mode='Markdown')
+        await query.edit_message_text(escape_markdown("✅ Your anonymous feedback has been sent to all teams."), parse_mode='Markdown')
         real_user_display_name = get_display_name(message_to_send.from_user)
         real_username = message_to_send.from_user.username or "No username"
         real_id = message_to_send.from_user.id
@@ -797,7 +794,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             f"- Full name: {real_user_display_name}"
         )
         try:
-            await context.bot.send_message(chat_id=special_user_id, text=info_message, parse_mode='Markdown')
+            await context.bot.send_message(chat_id=special_user_id, text=escape_markdown(info_message), parse_mode='Markdown')
         except Exception as e:
             logger.error(f"Failed to send real info to user {special_user_id}: {e}")
         del context.user_data[f'confirm{confirmation_uuid}']
@@ -807,7 +804,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             action, confirmation_uuid = data.split(':', 1)
         except ValueError:
-            await query.edit_message_text("Invalid confirmation data. Please try again.")
+            await query.edit_message_text(escape_markdown("Invalid confirmation data. Please try again."), parse_mode='Markdown')
             return ConversationHandler.END
         confirm_data = context.user_data.get(f'confirm_{confirmation_uuid}')
         if not confirm_data:
@@ -845,10 +842,10 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                         f"✅ Your message has been sent from {sender_display_name} "
                         f"to {', '.join(recipient_display_names)}."
                     )
-                await query.edit_message_text(confirmation_text, parse_mode='Markdown')
+                await query.edit_message_text(escape_markdown(confirmation_text), parse_mode='Markdown')
                 del context.user_data[f'confirm_{confirmation_uuid}']
             elif action == 'cancel':
-                await query.edit_message_text("Operation cancelled.", reply_markup=None)
+                await query.edit_message_text(escape_markdown("Operation cancelled."), reply_markup=None, parse_mode='Markdown')
                 if f'confirm_{confirmation_uuid}' in context.user_data:
                     del context.user_data[f'confirm_{confirmation_uuid}']
             return ConversationHandler.END
@@ -857,11 +854,11 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             _, confirmation_uuid = data.split(':', 1)
         except ValueError:
-            await query.edit_message_text("Invalid confirmation data. Please try again.")
+            await query.edit_message_text(escape_markdown("Invalid confirmation data. Please try again."), parse_mode='Markdown')
             return ConversationHandler.END
         confirm_data = context.user_data.get(f'confirm_userid{confirmation_uuid}')
         if not confirm_data:
-            await query.edit_message_text("An error occurred. Please try again.")
+            await query.edit_message_text(escape_markdown("An error occurred. Please try again."), parse_mode='Markdown')
             return ConversationHandler.END
         msg_text = confirm_data['msg_text']
         msg_doc = confirm_data['msg_doc']
@@ -879,11 +876,11 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                     chat_id=target_id,
                     text=msg_text
                 )
-            await query.edit_message_text("✅ Your message has been sent.", parse_mode='Markdown')
+            await query.edit_message_text(escape_markdown("✅ Your message has been sent."), parse_mode='Markdown')
             await reply_message.reply_text("sent")
         except Exception as e:
             logger.error(f"Failed to send message to user {target_id}: {e}")
-            await query.edit_message_text("❌ Failed to send message.", parse_mode='Markdown')
+            await query.edit_message_text(escape_markdown("❌ Failed to send message."), parse_mode='Markdown')
             await reply_message.reply_text("didn't sent")
         del context.user_data[f'confirm_userid{confirmation_uuid}']
         return ConversationHandler.END
@@ -892,14 +889,14 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             _, confirmation_uuid = data.split(':', 1)
         except ValueError:
-            await query.edit_message_text("Invalid confirmation data. Please try again.")
+            await query.edit_message_text(escape_markdown("Invalid confirmation data. Please try again."), parse_mode='Markdown')
             return ConversationHandler.END
         if f'confirm_userid{confirmation_uuid}' in context.user_data:
             del context.user_data[f'confirm_userid{confirmation_uuid}']
-        await query.edit_message_text("Operation cancelled.")
+        await query.edit_message_text(escape_markdown("Operation cancelled."), parse_mode='Markdown')
         return ConversationHandler.END
     else:
-        await query.edit_message_text("Invalid choice.")
+        await query.edit_message_text(escape_markdown("Invalid choice."), parse_mode='Markdown')
         return ConversationHandler.END
 
 async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -923,7 +920,7 @@ async def specific_user_trigger(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data['target_user_id'] = target_user_id
     context.user_data['target_username'] = target_username
     context.user_data['sender_role'] = 'tara_team'
-    await update.message.reply_text(f"Write your message for user @{target_username}.", parse_mode='Markdown')
+    await update.message.reply_text(escape_markdown(f"Write your message for user @{target_username}."), parse_mode='Markdown')
     return SPECIFIC_USER_MESSAGE
 
 async def specific_user_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1110,7 +1107,7 @@ async def handle_general_message(update: Update, context: ContextTypes.DEFAULT_T
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await message.reply_text(
-            "You have no roles. Do you want to send this as anonymous feedback to all teams?",
+            escape_markdown("You have no roles. Do you want to send this as anonymous feedback to all teams?"),
             parse_mode='Markdown',
             reply_markup=reply_markup
         )
@@ -1149,7 +1146,8 @@ async def user_id_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     target_id = int(match.group(1))
     await update.message.reply_text(
-        f"Please write the message (text or PDF) you want to send to user ID {target_id}.\nThen I'll ask for confirmation."
+        escape_markdown(f"Please write the message (text or PDF) you want to send to user ID {target_id}.\nThen I'll ask for confirmation."),
+        parse_mode='Markdown'
     )
     context.user_data['target_user_id_userid'] = target_id
     return SPECIFIC_USER_MESSAGE
@@ -1179,7 +1177,7 @@ async def user_id_message_collector(update: Update, context: ContextTypes.DEFAUL
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
+    await message.reply_text(escape_markdown(confirmation_text), parse_mode='Markdown', reply_markup=reply_markup)
     context.user_data[f'confirm_userid_{confirmation_uuid}'] = {
         'target_id': target_id,
         'original_message': message,
@@ -1283,7 +1281,7 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_lines.append(f"@{username} => {uid} (Roles: {roles_display})")
     user_list = "\n".join(user_lines)
     await update.message.reply_text(
-        f"Registered Users (Username => ID):\n\n{user_list}",
+        escape_markdown(f"Registered Users (Username => ID):\n\n{user_list}"),
         parse_mode='Markdown'
     )
 
@@ -1324,7 +1322,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/lecture - (Only admin 6177929931 can start/cancel) Create multiple lectures with registration slots.\n"
         "/lecture_test - (Testers only) Create test lectures to try out the lecture functionality."
     )
-    await update.message.reply_text(help_text, parse_mode='Markdown')
+    await update.message.reply_text(escape_markdown(help_text), parse_mode='Markdown')
 
 async def refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -1377,7 +1375,7 @@ async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 target_username = uname
                 break
         if target_username:
-            await update.message.reply_text(f"User @{target_username} has been muted.", parse_mode='Markdown')
+            await update.message.reply_text(escape_markdown(f"User @{target_username} has been muted."), parse_mode='Markdown')
         else:
             await update.message.reply_text(f"User ID {target_user_id} has been muted.")
 
@@ -1411,7 +1409,7 @@ async def unmute_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 target_username = uname
                 break
         if target_username:
-            await update.message.reply_text(f"User @{target_username} has been unmuted.", parse_mode='Markdown')
+            await update.message.reply_text(escape_markdown(f"User @{target_username} has been unmuted."), parse_mode='Markdown')
         else:
             await update.message.reply_text(f"User ID {target_user_id} has been unmuted.")
     else:
@@ -1442,7 +1440,7 @@ async def list_muted_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         else:
             muted_list.append(f"ID: {uid}")
     muted_users_text = "\n".join(muted_list)
-    await update.message.reply_text(f"Muted Users:\n{muted_users_text}", parse_mode='Markdown')
+    await update.message.reply_text(escape_markdown(f"Muted Users:\n{muted_users_text}"), parse_mode='Markdown')
 
 async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -1476,7 +1474,7 @@ async def check_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     roles = get_user_roles(check_id)
     roles_display = ", ".join(ROLE_DISPLAY_NAMES.get(r, r.capitalize()) for r in roles) if roles else "No role (anonymous feedback user)."
     await update.message.reply_text(
-        f"User ID: {check_id}\nUsername: @{username_found}\nRoles: {roles_display}",
+        escape_markdown(f"User ID: {check_id}\nUsername: @{username_found}\nRoles: {roles_display}"),
         parse_mode='Markdown'
     )
 
