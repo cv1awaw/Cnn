@@ -652,7 +652,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         except ValueError:
             await query.edit_message_text(escape_markdown("Invalid confirmation data. Please try again."), parse_mode='Markdown')
             return ConversationHandler.END
-        confirm_data = context.user_data.get(f'confirm{confirmation_uuid}')
+        confirm_data = context.user_data.get(f'confirm_{confirmation_uuid}')
         if not confirm_data:
             await query.edit_message_text(escape_markdown("An error occurred. Please try again."), parse_mode='Markdown')
             return ConversationHandler.END
@@ -679,7 +679,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             await context.bot.send_message(chat_id=special_user_id, text=escape_markdown(info_message), parse_mode='Markdown')
         except Exception as e:
             logger.error(f"Failed to send real info to user {special_user_id}: {e}")
-        del context.user_data[f'confirm{confirmation_uuid}']
+        del context.user_data[f'confirm_{confirmation_uuid}']
         return ConversationHandler.END
 
     if data.startswith('confirm:') or data.startswith('cancel:'):
@@ -738,7 +738,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         except ValueError:
             await query.edit_message_text(escape_markdown("Invalid confirmation data. Please try again."), parse_mode='Markdown')
             return ConversationHandler.END
-        confirm_data = context.user_data.get(f'confirm_userid{confirmation_uuid}')
+        confirm_data = context.user_data.get(f'confirm_userid_{confirmation_uuid}')
         if not confirm_data:
             await query.edit_message_text(escape_markdown("An error occurred. Please try again."), parse_mode='Markdown')
             return ConversationHandler.END
@@ -764,7 +764,7 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.error(f"Failed to send message to user {target_id}: {e}")
             await query.edit_message_text(escape_markdown("❌ Failed to send message."), parse_mode='Markdown')
             await reply_message.reply_text("didn't sent")
-        del context.user_data[f'confirm_userid{confirmation_uuid}']
+        del context.user_data[f'confirm_userid_{confirmation_uuid}']
         return ConversationHandler.END
 
     elif data.startswith("cancel_userid:"):
@@ -773,8 +773,8 @@ async def confirmation_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         except ValueError:
             await query.edit_message_text(escape_markdown("Invalid confirmation data. Please try again."), parse_mode='Markdown')
             return ConversationHandler.END
-        if f'confirm_userid{confirmation_uuid}' in context.user_data:
-            del context.user_data[f'confirm_userid{confirmation_uuid}']
+        if f'confirm_userid_{confirmation_uuid}' in context.user_data:
+            del context.user_data[f'confirm_userid_{confirmation_uuid}']
         await query.edit_message_text(escape_markdown("Operation cancelled."), parse_mode='Markdown')
         return ConversationHandler.END
     else:
